@@ -10,19 +10,17 @@ using UnityEngine.UIElements;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.2.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.3.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
         private static ProbeBehaviour _behaviour;
-
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.2 - F7 = safe probe player row");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.3 - F7 = datasource probe");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
-
         public override bool Unload()
         {
             if (_behaviour != null) UnityEngine.Object.Destroy(_behaviour);
@@ -38,54 +36,75 @@ namespace FM26FullPlayerProbe
         {
             try
             {
-                if (Keyboard.current != null && Keyboard.current.f7Key.wasPressedThisFrame)
-                    Probe();
+                if (Keyboard.current != null && Keyboard.current.f7Key.wasPressedThisFrame) Probe();
             }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogError("[FM26FullProbe] " + ex);
-            }
+            catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] " + ex); }
         }
 
         private void Probe()
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.2 SAFE ===");
-
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.3 DATASOURCE ===");
             var root = MainRoot();
             if (root == null) { Line(sb, "ERROR: main UI root not found"); Save(sb); return; }
-
             var table = Find(root, "playertable") ?? Find(root, "client-object-viewer-table");
             if (table == null) { Line(sb, "ERROR: player table not found"); Save(sb); return; }
-
             var view = Find(table, "View");
             if (view == null) { Line(sb, "ERROR: View not found"); Save(sb); return; }
 
-            Line(sb, $"Visible rows: {view.childCount}");
-            VisualElement target = null;
-            for (int i = 0; i < view.childCount; i++)
+            Line(sb, "Visible rows: " + SafeChildCount(view));
+            for (int i = 0; i < SafeChildCount(view); i++)
             {
-                var row = view.ElementAt(i);
-                bool selected = false;
-                try { selected = row.ClassListContains("virtualised-list__item--selected"); } catch { }
-                Line(sb, $"ROW {i}: type={SafeType(row)} name={SafeName(row)} selected={selected} children={SafeChildCount(row)}");
-                if (selected && target == null) target = row;
+                VisualElement row = null;
+                try { row = view.ElementAt(i); } catch { }
+                if (row == null) continue;
+                Line(sb, "\n=== ROW " + i + " ===");
+                DumpLive(row, sb, "row[" + i + "]", 0, 7);
             }
 
-            if (target == null && view.childCount > 0)
-            {
-                target = view.ElementAt(0);
-                Line(sb, "No selected marker; probing first visible row.");
-            }
-            if (target == null) { Line(sb, "ERROR: no row to probe"); Save(sb); return; }
-
-            Line(sb, "\n=== VISUAL TREE + SAFE METADATA ===");
-            DumpElement(target, sb, 0, 6);
-
-            Line(sb, "\n=== RELEVANT TYPES ===");
-            DumpTypes(sb);
-
+            Line(sb, "\n=== KEY TYPE METADATA ===");
+            DumpNamedType(sb, "FM.UI.PersonReference");
+            DumpNamedType(sb, "FM.UI.IPlayerReference");
+            DumpNamedType(sb, "FM.UI.PlayerAttributeReference");
+            DumpNamedType(sb, "FM.UI.AttributeNameAndValueReference");
+            DumpNamedType(sb, "FM.UI.AttributeValueReference");
+            DumpNamedType(sb, "FM.UI.PlayerReportScoutedAbilityReference");
             Save(sb);
+        }
+
+        private static void DumpLive(VisualElement el, StringBuilder sb, string path, int depth, int maxDepth)
+        {
+            if (el == null || depth > maxDepth) return;
+            string pad = new string(' ', depth * 2);
+            string name = SafeName(el);
+            string type = SafeType(el);
+            string dsType = "";
+            string dsPath = "";
+            object ds = null;
+            object ud = null;
+
+            try { dsType = el.dataSourceTypeString ?? ""; } catch (Exception ex) { dsType = "<" + ex.GetType().Name + ">"; }
+            try { dsPath = el.dataSourcePathString ?? ""; } catch (Exception ex) { dsPath = "<" + ex.GetType().Name + ">"; }
+            try { ds = el.dataSource; } catch (Exception ex) { Line(sb, pad + path + " dataSource=<" + ex.GetType().Name + ">"); }
+            try { ud = el.userData; } catch (Exception ex) { Line(sb, pad + path + " userData=<" + ex.GetType().Name + ">"); }
+
+            bool interesting = !string.IsNullOrEmpty(name) || !string.IsNullOrEmpty(dsType) || !string.IsNullOrEmpty(dsPath) || ds != null || ud != null;
+            if (interesting)
+            {
+                Line(sb, pad + path + " type=" + type + " name='" + name + "' children=" + SafeChildCount(el));
+                if (!string.IsNullOrEmpty(dsType)) Line(sb, pad + "  dataSourceTypeString='" + dsType + "'");
+                if (!string.IsNullOrEmpty(dsPath)) Line(sb, pad + "  dataSourcePathString='" + dsPath + "'");
+                if (ds != null) Line(sb, pad + "  dataSource managedType=" + SafeType(ds));
+                if (ud != null) Line(sb, pad + "  userData managedType=" + SafeType(ud));
+            }
+
+            int count = SafeChildCount(el);
+            for (int i = 0; i < count; i++)
+            {
+                VisualElement child = null;
+                try { child = el.ElementAt(i); } catch { }
+                DumpLive(child, sb, path + "/" + i, depth + 1, maxDepth);
+            }
         }
 
         private VisualElement MainRoot()
@@ -96,9 +115,9 @@ namespace FM26FullPlayerProbe
                 foreach (var doc in docs)
                 {
                     if (doc == null) continue;
-                    VisualElement root = null;
-                    try { root = doc.rootVisualElement; } catch { }
-                    if (root != null && SafeName(root) == "PanelManager-container") return root;
+                    VisualElement r = null;
+                    try { r = doc.rootVisualElement; } catch { }
+                    if (r != null && SafeName(r) == "PanelManager-container") return r;
                 }
             }
             catch { }
@@ -109,231 +128,66 @@ namespace FM26FullPlayerProbe
         {
             if (root == null) return null;
             if (SafeName(root) == name) return root;
-            int count = SafeChildCount(root);
-            for (int i = 0; i < count; i++)
+            int n = SafeChildCount(root);
+            for (int i = 0; i < n; i++)
             {
-                VisualElement child = null;
-                try { child = root.ElementAt(i); } catch { }
-                var x = Find(child, name);
+                VisualElement c = null;
+                try { c = root.ElementAt(i); } catch { }
+                var x = Find(c, name);
                 if (x != null) return x;
             }
             return null;
         }
 
-        private static void DumpElement(VisualElement el, StringBuilder sb, int depth, int maxDepth)
+        private static void DumpNamedType(StringBuilder sb, string fullName)
         {
-            if (el == null || depth > maxDepth) return;
-            string pad = new string(' ', depth * 2);
-            Line(sb, $"{pad}{SafeType(el)} name='{SafeName(el)}' children={SafeChildCount(el)}");
-
-            // Direct IL2CPP wrapper access is safe. Reflection invocation of generated
-            // getters is intentionally NOT used: some are UnmanagedCallersOnly and
-            // calling them via PropertyInfo.GetValue terminates the whole process.
-            try
+            foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
             {
-                var ud = el.userData;
-                if (ud != null)
-                    Line(sb, $"{pad} userData -> {SafeObjectSummary(ud)}");
-            }
-            catch (Exception ex)
-            {
-                Line(sb, $"{pad} userData -> <{ex.GetType().Name}>");
-            }
-
-            DumpMetadataOnly(el, sb, depth + 1);
-
-            int count = SafeChildCount(el);
-            for (int i = 0; i < count; i++)
-            {
-                VisualElement child = null;
-                try { child = el.ElementAt(i); } catch { }
-                DumpElement(child, sb, depth + 1, maxDepth);
-            }
-        }
-
-        private static void DumpMetadataOnly(object obj, StringBuilder sb, int depth)
-        {
-            if (obj == null) return;
-            string pad = new string(' ', depth * 2);
-            Type t;
-            try { t = obj.GetType(); } catch { return; }
-            var flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-            try
-            {
-                foreach (var p in t.GetProperties(flags))
+                Type t = null;
+                try { t = a.GetType(fullName, false); } catch { }
+                if (t == null) continue;
+                Line(sb, "TYPE " + fullName);
+                var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+                try
                 {
-                    if (!Interesting(p.Name)) continue;
-                    string pt = "?";
-                    try { pt = p.PropertyType.FullName ?? p.PropertyType.Name; } catch { }
-                    // Metadata only. Never invoke the getter through reflection.
-                    Line(sb, $"{pad}PROPERTY {p.Name} : {pt} readable={p.CanRead}");
+                    foreach (var p in t.GetProperties(flags))
+                        Line(sb, "  PROP " + p.Name + " : " + SafeTypeName(p.PropertyType));
                 }
-            }
-            catch (Exception ex)
-            {
-                Line(sb, $"{pad}<property-enumeration:{ex.GetType().Name}>");
-            }
-
-            try
-            {
-                foreach (var f in t.GetFields(flags))
+                catch { }
+                try
                 {
-                    if (!Interesting(f.Name)) continue;
-                    string ft = "?";
-                    try { ft = f.FieldType.FullName ?? f.FieldType.Name; } catch { }
-                    Line(sb, $"{pad}FIELD {f.Name} : {ft}");
+                    foreach (var f in t.GetFields(flags))
+                        Line(sb, "  FIELD " + f.Name + " : " + SafeTypeName(f.FieldType));
                 }
-            }
-            catch (Exception ex)
-            {
-                Line(sb, $"{pad}<field-enumeration:{ex.GetType().Name}>");
-            }
-        }
-
-        private static void DumpTypes(StringBuilder sb)
-        {
-            string[] wanted = {
-                "PlayerReference", "PersonReference", "PlayerDataReference",
-                "PlayerAttributeReference", "AttributeNameAndValueReference",
-                "AttributeValueReference", "PlayerReportScoutedAbilityReference",
-                "IGEMovePersonReference", "IPlayerReference"
-            };
-
-            int count = 0;
-            try
-            {
-                foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+                catch { }
+                try
                 {
-                    string an;
-                    try { an = a.GetName().Name ?? ""; } catch { continue; }
-                    if (!(an.StartsWith("FM") || an.StartsWith("SI"))) continue;
-
-                    Type[] types;
-                    try { types = a.GetTypes(); }
-                    catch (ReflectionTypeLoadException e) { types = e.Types; }
-                    catch { continue; }
-                    if (types == null) continue;
-
-                    foreach (var t in types)
-                    {
-                        if (t == null) continue;
-                        foreach (var w in wanted)
-                        {
-                            if ((t.FullName ?? "").IndexOf(w, StringComparison.OrdinalIgnoreCase) >= 0)
-                            {
-                                Line(sb, $"TYPE {an}: {t.FullName}");
-                                DumpTypeMetadata(t, sb);
-                                count++;
-                                break;
-                            }
-                        }
-                        if (count >= 120) return;
-                    }
+                    foreach (var c in t.GetConstructors(flags))
+                        Line(sb, "  CTOR " + c.ToString());
                 }
+                catch { }
+                return;
             }
-            catch (Exception ex)
-            {
-                Line(sb, "Type scan error: " + ex.GetType().Name + ": " + ex.Message);
-            }
+            Line(sb, "TYPE NOT FOUND " + fullName);
         }
 
-        private static void DumpTypeMetadata(Type t, StringBuilder sb)
-        {
-            var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-            try
-            {
-                foreach (var p in t.GetProperties(flags))
-                {
-                    if (!Interesting(p.Name)) continue;
-                    string pt = "?";
-                    try { pt = p.PropertyType.FullName ?? p.PropertyType.Name; } catch { }
-                    Line(sb, $"  PROP {p.Name} : {pt}");
-                }
-            }
-            catch { }
-
-            try
-            {
-                foreach (var m in t.GetMethods(flags))
-                {
-                    if (!Interesting(m.Name)) continue;
-                    Line(sb, $"  METHOD {m.Name}");
-                }
-            }
-            catch { }
-
-            try
-            {
-                foreach (var f in t.GetFields(flags))
-                {
-                    if (!Interesting(f.Name)) continue;
-                    string ft = "?";
-                    try { ft = f.FieldType.FullName ?? f.FieldType.Name; } catch { }
-                    Line(sb, $"  FIELD {f.Name} : {ft}");
-                }
-            }
-            catch { }
-        }
-
-        private static bool Interesting(string name)
-        {
-            string n = (name ?? "").ToLowerInvariant();
-            string[] keys = {
-                "player", "person", "reference", "data", "binding", "source", "id",
-                "ability", "potential", "attribute", "current", "value", "name", "club",
-                "team", "contract", "wage", "nation", "position", "foot", "reputation",
-                "personality", "consistency", "important", "professional", "ambition",
-                "injury", "temperament", "pressure", "sportsmanship"
-            };
-            foreach (var k in keys) if (n.Contains(k)) return true;
-            return false;
-        }
-
-        private static string SafeName(VisualElement el)
-        {
-            try { return el?.name ?? ""; } catch { return "<unreadable>"; }
-        }
-
-        private static int SafeChildCount(VisualElement el)
-        {
-            try { return el?.childCount ?? 0; } catch { return 0; }
-        }
-
-        private static string SafeType(object o)
-        {
-            if (o == null) return "<null>";
-            try { return o.GetType().FullName ?? o.GetType().Name; } catch { return "<unknown-type>"; }
-        }
-
-        private static string SafeObjectSummary(object o)
-        {
-            if (o == null) return "<null>";
-            return SafeType(o);
-        }
-
-        private static void Line(StringBuilder sb, string s)
-        {
-            sb.AppendLine(s);
-            try { Plugin.Log.LogInfo("[FM26FullProbe] " + s); } catch { }
-        }
+        private static string SafeName(VisualElement el) { try { return el?.name ?? ""; } catch { return "<unreadable>"; } }
+        private static int SafeChildCount(VisualElement el) { try { return el?.childCount ?? 0; } catch { return 0; } }
+        private static string SafeType(object o) { try { return o == null ? "<null>" : (o.GetType().FullName ?? o.GetType().Name); } catch { return "<unknown>"; } }
+        private static string SafeTypeName(Type t) { try { return t?.FullName ?? t?.Name ?? "?"; } catch { return "?"; } }
+        private static void Line(StringBuilder sb, string s) { sb.AppendLine(s); try { Plugin.Log.LogInfo("[FM26FullProbe] " + s); } catch { } }
 
         private static void Save(StringBuilder sb)
         {
             try
             {
-                string dir = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
-                    "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
                 string file = Path.Combine(dir, "probe_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex);
-            }
+            catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex); }
         }
     }
 }
