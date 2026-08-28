@@ -10,7 +10,7 @@ using UnityEngine.UIElements;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.5.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.6.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -18,7 +18,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.5 - F7 = FM reference handler probe");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.6 - F7 = selected-player handler probe");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -41,7 +41,7 @@ namespace FM26FullPlayerProbe
         private void Probe()
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.5 FM HANDLERS ===");
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.6 SELECTED PLAYER ===");
 
             var root = MainRoot();
             if (root != null)
@@ -50,15 +50,40 @@ namespace FM26FullPlayerProbe
                 var view = table == null ? null : Find(table, "View");
                 if (view != null)
                 {
-                    Line(sb, "Visible rows: " + SafeChildCount(view));
-                    int rows = Math.Min(3, SafeChildCount(view));
-                    for (int i = 0; i < rows; i++)
+                    int count = SafeChildCount(view);
+                    Line(sb, "Visible rows: " + count);
+                    VisualElement selectedRow = null;
+                    int selectedIndex = -1;
+                    for (int i = 0; i < count; i++)
                     {
                         VisualElement row = null;
                         try { row = view.ElementAt(i); } catch { }
-                        var show = row == null ? null : Find(row, "ShowPerson");
-                        Line(sb, "ROW " + i + " ShowPerson=" + (show != null));
-                        if (show != null) DumpElementContext(show, sb, "  ShowPerson");
+                        if (row == null) continue;
+                        bool selected = false;
+                        try { selected = row.ClassListContains("virtualised-list__item--selected"); } catch { }
+                        Line(sb, "ROW " + i + " selected=" + selected);
+                        if (selected && selectedRow == null)
+                        {
+                            selectedRow = row;
+                            selectedIndex = i;
+                        }
+                    }
+
+                    if (selectedRow != null)
+                    {
+                        Line(sb, "SELECTED ROW INDEX: " + selectedIndex);
+                        DumpElementContext(selectedRow, sb, "SelectedRow");
+                        var show = Find(selectedRow, "ShowPerson");
+                        Line(sb, "Selected ShowPerson=" + (show != null));
+                        if (show != null)
+                        {
+                            DumpElementContext(show, sb, "  ShowPerson");
+                            DumpAncestors(show, sb);
+                        }
+                    }
+                    else
+                    {
+                        Line(sb, "ERROR: no single selected row marker found. Select exactly one player before F7.");
                     }
                 }
                 else Line(sb, "Player table/View not found; continuing with type metadata.");
@@ -86,6 +111,16 @@ namespace FM26FullPlayerProbe
             }, 220);
 
             Save(sb);
+        }
+
+        private static void DumpAncestors(VisualElement el, StringBuilder sb)
+        {
+            VisualElement p = el;
+            for (int i = 0; i < 12 && p != null; i++)
+            {
+                DumpElementContext(p, sb, "ancestor[" + i + "]");
+                try { p = p.parent; } catch { p = null; }
+            }
         }
 
         private static void DumpExactType(StringBuilder sb, string fullName)
