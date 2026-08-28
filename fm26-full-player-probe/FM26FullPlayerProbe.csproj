@@ -46,6 +46,10 @@
       <HintPath>$(FM26Path)\BepInEx\interop\FM.UI.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="FM.GamePlugin">
+      <HintPath>$(FM26Path)\BepInEx\interop\FM.GamePlugin.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="FMGame">
       <HintPath>$(FM26Path)\BepInEx\interop\FMGame.dll</HintPath>
       <Private>false</Private>
