@@ -9,7 +9,7 @@ using FM.UI;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.15.1")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.16.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -18,7 +18,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.15.1 DIRECT PERSON INDEX PROBE - press F8 anywhere after loading a save. No Harmony/UI traversal.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.16 PACKED INDEX PROBE - press F8 after loading a save.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -38,7 +38,7 @@ namespace FM26FullPlayerProbe
             try
             {
                 if (Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
-                    RunIndexProbe();
+                    RunProbe();
             }
             catch (Exception ex)
             {
@@ -46,68 +46,130 @@ namespace FM26FullPlayerProbe
             }
         }
 
-        private void RunIndexProbe()
+        private void RunProbe()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.15.1 DIRECT PERSON INDEX PROBE ===");
-            sb.AppendLine("Goal: test whether PersonReference(int index) + TryGetValue(UID) can enumerate database persons directly.");
+            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.16 PACKED INDEX PROBE ===");
+            sb.AppendLine("Previous result: raw PersonReference indices 0..1999 constructed but produced zero UID hits.");
+            sb.AppendLine("Testing whether the constructor expects a packed DatabaseTableType + row index.");
             sb.AppendLine("PersonReference.UID schema key=" + PersonReference.UID);
-            sb.AppendLine("Range: index 0..1999, stop after 100 successful UID reads.");
             sb.AppendLine();
 
-            int created = 0;
-            int ctorErrors = 0;
-            int tryErrors = 0;
-            int hits = 0;
-
-            for (int index = 0; index < 2000 && hits < 100; index++)
+            sb.AppendLine("=== DatabaseTableType ENUM ===");
+            string[] names = null;
+            Array values = null;
+            try
             {
-                PersonReference pr = null;
-                try
+                names = System.Enum.GetNames(typeof(DatabaseTableType));
+                values = System.Enum.GetValues(typeof(DatabaseTableType));
+                int n = Math.Min(names.Length, values.Length);
+                for (int i = 0; i < n; i++)
                 {
-                    pr = new PersonReference(index);
-                    created++;
+                    int v = Convert.ToInt32(values.GetValue(i));
+                    sb.AppendLine("ENUM name='" + names[i] + "' value=" + v);
                 }
-                catch (Exception ex)
-                {
-                    ctorErrors++;
-                    if (ctorErrors <= 10)
-                        sb.AppendLine("index=" + index + " ctor failed: " + ex.GetType().Name + " - " + ex.Message);
-                    continue;
-                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("Enum dump failed: " + ex.GetType().Name + " - " + ex.Message);
+            }
 
-                if (pr == null)
-                {
-                    sb.AppendLine("index=" + index + " constructor returned null");
-                    continue;
-                }
+            sb.AppendLine();
+            sb.AppendLine("=== RAW CONSTRUCTOR DECODE ===");
+            for (int raw = 0; raw < 4; raw++)
+                DumpReferenceShape(sb, raw, "RAW");
 
-                try
+            sb.AppendLine();
+            sb.AppendLine("=== PACKED CANDIDATE TESTS ===");
+            int[] shifts = new[] { 16, 20, 24, 28 };
+            int hits = 0;
+            int attempts = 0;
+
+            if (names != null && values != null)
+            {
+                int n = Math.Min(names.Length, values.Length);
+                for (int i = 0; i < n && hits < 30; i++)
                 {
-                    int uid;
-                    bool ok = pr.TryGetValue(PersonReference.UID, out uid);
-                    if (ok)
+                    string name = names[i] ?? "";
+                    if (name.IndexOf("person", StringComparison.OrdinalIgnoreCase) < 0 &&
+                        name.IndexOf("player", StringComparison.OrdinalIgnoreCase) < 0)
+                        continue;
+
+                    int tableValue;
+                    try { tableValue = Convert.ToInt32(values.GetValue(i)); }
+                    catch { continue; }
+
+                    foreach (int shift in shifts)
                     {
-                        hits++;
-                        sb.AppendLine("HIT index=" + index + " uid=" + uid + " ptr=0x" + pr.Pointer.ToString("X"));
+                        for (int index = 0; index < 64 && hits < 30; index++)
+                        {
+                            int combined = unchecked((tableValue << shift) | index);
+                            attempts++;
+                            if (TryCandidate(sb, name, tableValue, shift, index, combined))
+                                hits++;
+                        }
                     }
-                    else if (index < 20)
-                    {
-                        sb.AppendLine("MISS index=" + index + " uid=" + uid);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    tryErrors++;
-                    if (tryErrors <= 20)
-                        sb.AppendLine("index=" + index + " TryGetValue failed: " + ex.GetType().Name + " - " + ex.Message);
                 }
             }
 
             sb.AppendLine();
-            sb.AppendLine("SUMMARY created=" + created + " hits=" + hits + " ctorErrors=" + ctorErrors + " tryErrors=" + tryErrors);
-
+            sb.AppendLine("SUMMARY packedAttempts=" + attempts + " uidHits=" + hits);
             Save(sb);
+        }
+
+        private static void DumpReferenceShape(StringBuilder sb, int combined, string label)
+        {
+            try
+            {
+                var pr = new PersonReference(combined);
+                if (pr == null)
+                {
+                    sb.AppendLine(label + " combined=" + combined + " -> <null>");
+                    return;
+                }
+
+                string typeText = "?";
+                string indexText = "?";
+                string combinedText = "?";
+                string data1Text = "?";
+                try { typeText = pr.Type.ToString(); } catch (Exception ex) { typeText = "<" + ex.GetType().Name + ">"; }
+                try { indexText = pr.m_index.ToString(); } catch (Exception ex) { indexText = "<" + ex.GetType().Name + ">"; }
+                try { combinedText = pr.CombinedIndexAndType.ToString(); } catch (Exception ex) { combinedText = "<" + ex.GetType().Name + ">"; }
+                try { data1Text = pr.Data1.ToString(); } catch (Exception ex) { data1Text = "<" + ex.GetType().Name + ">"; }
+
+                sb.AppendLine(label + " input=" + combined + " type=" + typeText + " m_index=" + indexText + " combined=" + combinedText + " Data1=" + data1Text);
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine(label + " combined=" + combined + " ctor/shape failed: " + ex.GetType().Name + " - " + ex.Message);
+            }
+        }
+
+        private static bool TryCandidate(StringBuilder sb, string tableName, int tableValue, int shift, int index, int combined)
+        {
+            try
+            {
+                var pr = new PersonReference(combined);
+                if (pr == null) return false;
+
+                int uid;
+                bool ok = pr.TryGetValue(PersonReference.UID, out uid);
+                if (!ok) return false;
+
+                string typeText = "?";
+                string realIndex = "?";
+                try { typeText = pr.Type.ToString(); } catch { }
+                try { realIndex = pr.m_index.ToString(); } catch { }
+
+                sb.AppendLine("HIT table='" + tableName + "' tableValue=" + tableValue + " shift=" + shift + " index=" + index + " combined=" + combined + " decodedType=" + typeText + " decodedIndex=" + realIndex + " uid=" + uid + " ptr=0x" + pr.Pointer.ToString("X"));
+                return true;
+            }
+            catch (Exception ex)
+            {
+                if (index == 0)
+                    sb.AppendLine("candidate table='" + tableName + "' shift=" + shift + " failed: " + ex.GetType().Name + " - " + ex.Message);
+                return false;
+            }
         }
 
         private static void Save(StringBuilder sb)
@@ -116,7 +178,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "indexprobe_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "packedindexprobe_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
