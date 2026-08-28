@@ -22,6 +22,10 @@
       <HintPath>$(FM26Path)\BepInEx\core\Il2CppInterop.Runtime.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="Il2Cppmscorlib">
+      <HintPath>$(FM26Path)\BepInEx\interop\Il2Cppmscorlib.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>$(FM26Path)\BepInEx\interop\UnityEngine.CoreModule.dll</HintPath>
       <Private>false</Private>
