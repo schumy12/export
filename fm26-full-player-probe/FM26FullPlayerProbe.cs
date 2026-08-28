@@ -1,17 +1,15 @@
 using System;
 using System.IO;
-using System.Reflection;
 using System.Text;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using FM.UI;
-using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.18.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.19.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -20,7 +18,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.18 PERSON PROPERTY SCHEMA - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.19 REAL PERSON PROPERTY PROBE - press F8 after loading a save.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -33,6 +31,22 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
+        private const uint UniqueId = 1970170212u;
+        private const uint IsPlayer = 862938733u;
+        private const uint PlayerCurrentAbility = 1346584898u;
+        private const uint PlayerPotentialAbility = 1347436866u;
+        private const uint AttributeProfessionalism = 1349546607u;
+        private const uint AttributeAmbition = 1348562274u;
+        private const uint AttributePressure = 1349546597u;
+        private const uint AttributeSportsmanship = 1349742703u;
+        private const uint AttributeTemperament = 1349805421u;
+        private const uint Consistency = 1346588494u;
+        private const uint ImportantMatches = 1349086576u;
+        private const uint InjuryProneness = 1349087346u;
+        private const uint Versatility = 1349936498u;
+        private const uint AttributeAcceleration = 892805152u;
+        private const uint AttributeFinishing = 858923040u;
+
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
 
         private void Update()
@@ -51,143 +65,159 @@ namespace FM26FullPlayerProbe
         private void RunProbe()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.18 PERSON PROPERTY SCHEMA ===");
-            sb.AppendLine("Goal: determine whether PersonReference.UID is a reference-type identifier or an actual readable person property.");
-            sb.AppendLine("PersonReference.UID=" + PersonReference.UID);
-            sb.AppendLine("PersonReference.Identifier=" + Safe(() => PersonReference.Identifier.ToString()));
+            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.19 REAL PERSON PROPERTY PROBE ===");
+            sb.AppendLine("Uses property IDs discovered from PersonReference.GetPropertiesInternal().");
             sb.AppendLine();
 
-            sb.AppendLine("=== UID SCHEMA TEST ===");
-            try { sb.AppendLine("AcceptsPropertyInternal(UID)=" + PersonReference.AcceptsPropertyInternal(PersonReference.UID)); }
-            catch (Exception ex) { sb.AppendLine("AcceptsPropertyInternal(UID) failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            try { sb.AppendLine("GetPropertyTypeInternal(UID)=" + PersonReference.GetPropertyTypeInternal(PersonReference.UID)); }
-            catch (Exception ex) { sb.AppendLine("GetPropertyTypeInternal(UID) failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            try { sb.AppendLine("GetPropertyDescriptionInternal(UID)='" + (PersonReference.GetPropertyDescriptionInternal(PersonReference.UID) ?? "") + "'"); }
-            catch (Exception ex) { sb.AppendLine("GetPropertyDescriptionInternal(UID) failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            try { sb.AppendLine("GetPropertyCountInternal()=" + PersonReference.GetPropertyCountInternal()); }
-            catch (Exception ex) { sb.AppendLine("GetPropertyCountInternal failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            sb.AppendLine();
-            sb.AppendLine("=== PERSONREFERENCE PROPERTY LIST ===");
-            DumpPropertyList(sb);
+            sb.AppendLine("=== SCHEMA ACCEPTANCE ===");
+            DumpAcceptance(sb, "UniqueId", UniqueId);
+            DumpAcceptance(sb, "IsPlayer", IsPlayer);
+            DumpAcceptance(sb, "PlayerCurrentAbility", PlayerCurrentAbility);
+            DumpAcceptance(sb, "PlayerPotentialAbility", PlayerPotentialAbility);
+            DumpAcceptance(sb, "AttributeProfessionalism", AttributeProfessionalism);
+            DumpAcceptance(sb, "Consistency", Consistency);
+            DumpAcceptance(sb, "ImportantMatches", ImportantMatches);
+            DumpAcceptance(sb, "InjuryProneness", InjuryProneness);
+            DumpAcceptance(sb, "Versatility", Versatility);
+            DumpAcceptance(sb, "AttributeAcceleration", AttributeAcceleration);
 
             sb.AppendLine();
-            sb.AppendLine("=== REFERENCE RELATION TESTS ===");
-            try { sb.AppendLine("PersonReference.DerivesFromInternal(PersonReference.UID)=" + PersonReference.DerivesFromInternal(PersonReference.UID)); }
-            catch (Exception ex) { sb.AppendLine("PersonReference.DerivesFromInternal(UID) failed: " + ex.GetType().Name + " - " + ex.Message); }
+            sb.AppendLine("=== FIXED INDEX TESTS ===");
+            int[] fixedIndices = new[] { 0, 1, 2, 10, 100, 1000, 5000, 10000, 25000, 50000, 75000, 100000 };
+            foreach (int index in fixedIndices)
+                DumpIndex(sb, index, true);
 
-            try
+            sb.AppendLine();
+            sb.AppendLine("=== DIRECT PERSON TABLE SCAN 0..99999 ===");
+            int hits = 0;
+            int uniqueIdReads = 0;
+            int caReads = 0;
+            int paReads = 0;
+            int errors = 0;
+
+            for (int index = 0; index < 100000 && hits < 100; index++)
             {
-                uint playerUid = GetReferenceUidFromIdentifier(IPlayerReference.Identifier.ToString());
-                sb.AppendLine("IPlayerReference.Identifier=" + IPlayerReference.Identifier.ToString());
-                sb.AppendLine("IPlayerReference parsed UID=" + playerUid);
-                if (playerUid != 0)
-                    sb.AppendLine("PersonReference.DerivesFromInternal(IPlayerReference UID)=" + PersonReference.DerivesFromInternal(playerUid));
-            }
-            catch (Exception ex)
-            {
-                sb.AppendLine("IPlayerReference relation test failed: " + ex.GetType().Name + " - " + ex.Message);
+                try
+                {
+                    var pr = new PersonReference(index);
+                    if (pr == null) continue;
+
+                    int uniqueId;
+                    if (!pr.TryGetValue(UniqueId, out uniqueId))
+                        continue;
+
+                    uniqueIdReads++;
+                    if (uniqueId <= 0) continue;
+
+                    int isPlayer;
+                    bool hasIsPlayer = pr.TryGetValue(IsPlayer, out isPlayer);
+
+                    int ca;
+                    bool hasCa = pr.TryGetValue(PlayerCurrentAbility, out ca);
+                    if (hasCa) caReads++;
+
+                    int pa;
+                    bool hasPa = pr.TryGetValue(PlayerPotentialAbility, out pa);
+                    if (hasPa) paReads++;
+
+                    hits++;
+                    sb.Append("HIT index=" + index + " uniqueId=" + uniqueId);
+                    sb.Append(" isPlayer=" + (hasIsPlayer ? isPlayer.ToString() : "<no>"));
+                    sb.Append(" CA=" + (hasCa ? ca.ToString() : "<no>"));
+                    sb.Append(" PA=" + (hasPa ? pa.ToString() : "<no>"));
+                    AppendValue(sb, pr, " Prof", AttributeProfessionalism);
+                    AppendValue(sb, pr, " Amb", AttributeAmbition);
+                    AppendValue(sb, pr, " Pressure", AttributePressure);
+                    AppendValue(sb, pr, " Sports", AttributeSportsmanship);
+                    AppendValue(sb, pr, " Temp", AttributeTemperament);
+                    AppendValue(sb, pr, " Cons", Consistency);
+                    AppendValue(sb, pr, " ImpMatches", ImportantMatches);
+                    AppendValue(sb, pr, " Injury", InjuryProneness);
+                    AppendValue(sb, pr, " Vers", Versatility);
+                    AppendValue(sb, pr, " Acc", AttributeAcceleration);
+                    AppendValue(sb, pr, " Fin", AttributeFinishing);
+                    sb.AppendLine();
+                }
+                catch (Exception ex)
+                {
+                    errors++;
+                    if (errors <= 10)
+                        sb.AppendLine("index=" + index + " ERROR " + ex.GetType().Name + " - " + ex.Message);
+                }
             }
 
             sb.AppendLine();
-            sb.AppendLine("=== PROPERTYID MANAGED METADATA (NO GETTERS INVOKED) ===");
-            DumpTypeMetadata(sb, typeof(PropertyID));
-            DumpTypeMetadata(sb, typeof(ReferenceID));
-
+            sb.AppendLine("SUMMARY hits=" + hits + " uniqueIdReads=" + uniqueIdReads + " caReads=" + caReads + " paReads=" + paReads + " errors=" + errors);
             Save(sb);
         }
 
-        private static void DumpPropertyList(StringBuilder sb)
+        private static void DumpAcceptance(StringBuilder sb, string name, uint id)
         {
             try
             {
-                var props = new Il2CppSystem.Collections.Generic.List<PropertyID>();
-                PersonReference.GetPropertiesInternal(props);
-                sb.AppendLine("GetPropertiesInternal list count=" + props.Count);
-
-                for (int i = 0; i < props.Count; i++)
-                {
-                    PropertyID pid = props[i];
-                    string text = "?";
-                    try { text = pid.ToString(); } catch (Exception ex) { text = "<ToString failed: " + ex.GetType().Name + ">"; }
-                    sb.AppendLine("PROPERTY[" + i + "] text='" + text + "'");
-                }
+                bool accepts = PersonReference.AcceptsPropertyInternal(id);
+                string kind = "?";
+                string desc = "";
+                try { kind = PersonReference.GetPropertyTypeInternal(id).ToString(); } catch { }
+                try { desc = PersonReference.GetPropertyDescriptionInternal(id) ?? ""; } catch { }
+                sb.AppendLine(name + " id=" + id + " accepts=" + accepts + " kind=" + kind + " desc='" + desc + "'");
             }
             catch (Exception ex)
             {
-                sb.AppendLine("GetPropertiesInternal failed: " + ex.GetType().Name + " - " + ex.Message);
+                sb.AppendLine(name + " id=" + id + " acceptance failed: " + ex.GetType().Name + " - " + ex.Message);
             }
         }
 
-        private static uint GetReferenceUidFromIdentifier(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return 0;
-            int colon = s.LastIndexOf(':');
-            if (colon < 0 || colon + 1 >= s.Length) return 0;
-            uint value;
-            return uint.TryParse(s.Substring(colon + 1), out value) ? value : 0;
-        }
-
-        private static string Safe(Func<string> f)
-        {
-            try { return f(); }
-            catch (Exception ex) { return "<" + ex.GetType().Name + ": " + ex.Message + ">"; }
-        }
-
-        private static void DumpTypeMetadata(StringBuilder sb, Type t)
-        {
-            if (t == null) return;
-            sb.AppendLine("TYPE " + (t.FullName ?? t.Name));
-            try { sb.AppendLine("  BaseType=" + (t.BaseType == null ? "<null>" : (t.BaseType.FullName ?? t.BaseType.Name))); } catch { }
-
-            var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-            try
-            {
-                foreach (var p in t.GetProperties(flags))
-                    sb.AppendLine("  PROP " + (IsStatic(p) ? "static " : "") + p.Name + " : " + SafeTypeName(p.PropertyType));
-            }
-            catch (Exception ex) { sb.AppendLine("  properties failed: " + ex.GetType().Name); }
-
-            try
-            {
-                foreach (var f in t.GetFields(flags))
-                    sb.AppendLine("  FIELD " + (f.IsStatic ? "static " : "") + f.Name + " : " + SafeTypeName(f.FieldType));
-            }
-            catch (Exception ex) { sb.AppendLine("  fields failed: " + ex.GetType().Name); }
-
-            try
-            {
-                foreach (var m in t.GetMethods(flags))
-                    sb.AppendLine("  METHOD " + (m.IsStatic ? "static " : "") + SafeMemberString(m));
-            }
-            catch (Exception ex) { sb.AppendLine("  methods failed: " + ex.GetType().Name); }
-        }
-
-        private static bool IsStatic(PropertyInfo p)
+        private static void DumpIndex(StringBuilder sb, int index, bool includeHidden)
         {
             try
             {
-                var g = p.GetGetMethod(true);
-                if (g != null) return g.IsStatic;
-                var s = p.GetSetMethod(true);
-                return s != null && s.IsStatic;
+                var pr = new PersonReference(index);
+                if (pr == null)
+                {
+                    sb.AppendLine("INDEX " + index + " -> <null>");
+                    return;
+                }
+
+                int uid;
+                bool hasUid = pr.TryGetValue(UniqueId, out uid);
+                int isPlayer;
+                bool hasPlayer = pr.TryGetValue(IsPlayer, out isPlayer);
+                int ca;
+                bool hasCa = pr.TryGetValue(PlayerCurrentAbility, out ca);
+                int pa;
+                bool hasPa = pr.TryGetValue(PlayerPotentialAbility, out pa);
+
+                sb.Append("INDEX " + index + " uniqueId=" + (hasUid ? uid.ToString() : "<no>"));
+                sb.Append(" isPlayer=" + (hasPlayer ? isPlayer.ToString() : "<no>"));
+                sb.Append(" CA=" + (hasCa ? ca.ToString() : "<no>"));
+                sb.Append(" PA=" + (hasPa ? pa.ToString() : "<no>"));
+                if (includeHidden)
+                {
+                    AppendValue(sb, pr, " Prof", AttributeProfessionalism);
+                    AppendValue(sb, pr, " Cons", Consistency);
+                    AppendValue(sb, pr, " Acc", AttributeAcceleration);
+                }
+                sb.AppendLine();
             }
-            catch { return false; }
+            catch (Exception ex)
+            {
+                sb.AppendLine("INDEX " + index + " failed: " + ex.GetType().Name + " - " + ex.Message);
+            }
         }
 
-        private static string SafeTypeName(Type t)
+        private static void AppendValue(StringBuilder sb, PersonReference pr, string label, uint propertyId)
         {
-            try { return t == null ? "?" : (t.FullName ?? t.Name); }
-            catch { return "?"; }
-        }
-
-        private static string SafeMemberString(MethodBase m)
-        {
-            try { return m == null ? "?" : m.ToString(); }
-            catch { return m == null ? "?" : m.Name; }
+            try
+            {
+                int value;
+                bool ok = pr.TryGetValue(propertyId, out value);
+                sb.Append(label + "=" + (ok ? value.ToString() : "<no>"));
+            }
+            catch (Exception ex)
+            {
+                sb.Append(label + "=<" + ex.GetType().Name + ">");
+            }
         }
 
         private static void Save(StringBuilder sb)
@@ -196,7 +226,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "propertyschema_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "realpersonprobe_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
