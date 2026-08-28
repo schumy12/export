@@ -10,7 +10,7 @@ using FM.UI;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.10.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.11.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -19,7 +19,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.10 SAFE - open a player profile normally, then press F8. No UI-tree traversal, no Harmony.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.11 SAFE - open player profile, press F8. Unity-object census only; no Harmony/UI traversal/getter reflection.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -39,7 +39,7 @@ namespace FM26FullPlayerProbe
             try
             {
                 if (Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
-                    ProbeProfileRuntime();
+                    ProbeRuntime();
             }
             catch (Exception ex)
             {
@@ -47,57 +47,42 @@ namespace FM26FullPlayerProbe
             }
         }
 
-        private void ProbeProfileRuntime()
+        private void ProbeRuntime()
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.10 SCHEMA + LIVE COMPONENTS ===");
-            Line(sb, "No UI VisualElement traversal is performed in this version.");
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.11 LIVE UNITY OBJECTS ===");
+            Line(sb, "No Harmony. No VisualElement traversal. No generated FM/SI property getters invoked.");
 
-            Line(sb, "\n=== DIRECT FM.UI REFERENCE SCHEMA CONSTANTS ===");
-            TryDirectSchemaReads(sb);
+            Line(sb, "\n=== CONFIRMED SCHEMA KEYS ===");
+            try { Line(sb, "PersonReference.UID=" + PersonReference.UID); } catch (Exception ex) { Line(sb, "PersonReference.UID failed: " + ex.GetType().Name); }
+            try { Line(sb, "PersonReference.Identifier=" + PersonReference.Identifier.ToString()); } catch (Exception ex) { Line(sb, "PersonReference.Identifier failed: " + ex.GetType().Name); }
+            try { Line(sb, "PlayerReportReference.Identifier=" + PlayerReportReference.Identifier.ToString()); } catch (Exception ex) { Line(sb, "PlayerReportReference.Identifier failed: " + ex.GetType().Name); }
 
-            Line(sb, "\n=== LIVE MONOBEHAVIOUR CENSUS (PROFILE/PANEL/BINDING/DATA RELATED) ===");
-            DumpLiveBehaviours(sb, 300);
+            Line(sb, "\n=== LIVE UNITYENGINE.OBJECT CENSUS ===");
+            DumpUnityObjects(sb, 800);
 
-            Line(sb, "\n=== MATCHING FM/SI TYPE METADATA ===");
-            DumpTypeMatches(sb, new[] {
-                "PanelManager", "Panel", "Profile", "Player", "Person", "Binding",
-                "Record", "Parameter", "Param", "Navigation", "Context", "DataReference"
-            }, 350);
+            Line(sb, "\n=== TARGET TYPE INHERITANCE/METADATA ===");
+            DumpTargetType(sb, typeof(PersonReference));
+            DumpTargetType(sb, typeof(PlayerReportReference));
+            DumpNamedType(sb, "FM.UI.EmbeddedDataHandler");
+            DumpNamedType(sb, "FM.UI.EmbeddedDataHandler+PersonReferenceClickedHandler");
+            DumpNamedType(sb, "SI.Bindable.BindingSubsystem");
+            DumpNamedType(sb, "SI.Bindable.Bindings");
+            DumpNamedType(sb, "SI.Bindable.PanelID");
+            DumpNamedType(sb, "SI.Core.Record");
+            DumpNamedType(sb, "SI.Core.TypedValue");
+            DumpNamedType(sb, "FM.UI.DatabaseRecordReference");
 
             Save(sb);
         }
 
-        private static void TryDirectSchemaReads(StringBuilder sb)
+        private static void DumpUnityObjects(StringBuilder sb, int max)
         {
-            // These generated FM.UI properties are static schema/property identifiers,
-            // not per-player values. Previous compiler diagnostics proved UID is static.
-            try { Line(sb, "PersonReference.UID schema key = " + PersonReference.UID); }
-            catch (Exception ex) { Line(sb, "PersonReference.UID read failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            try { Line(sb, "PersonReference.Identifier = " + PersonReference.Identifier.ToString()); }
-            catch (Exception ex) { Line(sb, "PersonReference.Identifier read failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            try { Line(sb, "MatchPlayerReference.UID schema key = " + MatchPlayerReference.UID); }
-            catch (Exception ex) { Line(sb, "MatchPlayerReference.UID read failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            try { Line(sb, "MatchPlayerReference.Identifier = " + MatchPlayerReference.Identifier.ToString()); }
-            catch (Exception ex) { Line(sb, "MatchPlayerReference.Identifier read failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            try { Line(sb, "PlayerReportReference.Identifier = " + PlayerReportReference.Identifier.ToString()); }
-            catch (Exception ex) { Line(sb, "PlayerReportReference.Identifier read failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            try { Line(sb, "PlayerReportBasicInfoReference.Identifier = " + PlayerReportBasicInfoReference.Identifier.ToString()); }
-            catch (Exception ex) { Line(sb, "PlayerReportBasicInfoReference.Identifier read failed: " + ex.GetType().Name + " - " + ex.Message); }
-        }
-
-        private static void DumpLiveBehaviours(StringBuilder sb, int max)
-        {
-            MonoBehaviour[] all;
-            try { all = Resources.FindObjectsOfTypeAll<MonoBehaviour>(); }
+            UnityEngine.Object[] all;
+            try { all = Resources.FindObjectsOfTypeAll<UnityEngine.Object>(); }
             catch (Exception ex)
             {
-                Line(sb, "FindObjectsOfTypeAll<MonoBehaviour> failed: " + ex.GetType().Name + " - " + ex.Message);
+                Line(sb, "FindObjectsOfTypeAll<UnityEngine.Object> failed: " + ex.GetType().Name + " - " + ex.Message);
                 return;
             }
 
@@ -105,111 +90,88 @@ namespace FM26FullPlayerProbe
             int matched = 0;
             if (all != null)
             {
-                foreach (var mb in all)
+                foreach (var obj in all)
                 {
                     total++;
-                    if (mb == null) continue;
+                    if (obj == null) continue;
 
-                    string type = SafeManagedType(mb);
+                    string type = SafeManagedType(obj);
                     if (!ContainsAny(type,
-                        "FM.", "SI.", "panel", "profile", "player", "person", "binding", "record", "navigation", "data"))
+                        "FM.UI", "SI.Bindable", "SI.UI", "Panel", "Profile", "Person", "Player",
+                        "Binding", "Record", "Reference", "DataHandler", "ContextMenu"))
                         continue;
 
-                    string go = "";
-                    try { go = mb.gameObject == null ? "<null>" : (mb.gameObject.name ?? ""); } catch { go = "<error>"; }
-                    string name = "";
-                    try { name = mb.name ?? ""; } catch { }
+                    string objName = "";
+                    try { objName = obj.name ?? ""; } catch { objName = "<error>"; }
 
-                    Line(sb, "LIVE type=" + type + " behaviourName='" + name + "' gameObject='" + go + "'");
-                    matched++;
-
-                    if (ContainsAny(type, "panel", "profile", "player", "person", "binding", "record", "navigation"))
+                    string extra = "";
+                    try
                     {
-                        Type mt = null;
-                        try { mt = mb.GetType(); } catch { }
-                        if (mt != null) DumpInterestingMembers(mt, sb, "  ", 80);
+                        var c = obj as Component;
+                        if (c != null)
+                        {
+                            string go = c.gameObject == null ? "<null>" : (c.gameObject.name ?? "");
+                            extra = " gameObject='" + go + "'";
+                        }
                     }
+                    catch { }
 
+                    Line(sb, "LIVEOBJ type=" + type + " name='" + objName + "'" + extra);
+                    matched++;
                     if (matched >= max) break;
                 }
             }
-
-            Line(sb, "MonoBehaviours total=" + total + " matched/logged=" + matched);
+            Line(sb, "UnityEngine.Objects total=" + total + " matched/logged=" + matched);
         }
 
-        private static void DumpTypeMatches(StringBuilder sb, string[] needles, int max)
+        private static void DumpNamedType(StringBuilder sb, string fullName)
         {
-            int count = 0;
+            Type found = null;
             foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
             {
-                string an = "";
-                try { an = a.GetName().Name ?? ""; } catch { continue; }
-                if (!(an.StartsWith("FM") || an.StartsWith("SI"))) continue;
-
-                Type[] types;
-                try { types = a.GetTypes(); }
-                catch (ReflectionTypeLoadException e) { types = e.Types; }
-                catch { continue; }
-                if (types == null) continue;
-
-                foreach (var t in types)
+                try
                 {
-                    if (t == null) continue;
-                    string fn = t.FullName ?? "";
-                    if (!ContainsAny(fn, needles)) continue;
-
-                    bool memberHit = TypeHasInterestingMember(t);
-                    if (!memberHit && !ContainsAny(fn, "PanelManager", "PlayerPanel", "PersonPanel", "Profile", "Record", "Binding"))
-                        continue;
-
-                    Line(sb, "TYPE " + an + ": " + fn);
-                    DumpInterestingMembers(t, sb, "  ", 140);
-                    if (++count >= max) return;
+                    found = a.GetType(fullName, false);
+                    if (found != null) break;
                 }
+                catch { }
             }
-            Line(sb, "Matching types logged=" + count);
+
+            if (found == null)
+            {
+                Line(sb, "TYPE NOT FOUND: " + fullName);
+                return;
+            }
+            DumpTargetType(sb, found);
         }
 
-        private static bool TypeHasInterestingMember(Type t)
+        private static void DumpTargetType(StringBuilder sb, Type t)
         {
+            if (t == null) return;
+            Line(sb, "TYPE " + (t.FullName ?? t.Name));
+            try { Line(sb, "  BaseType=" + (t.BaseType == null ? "<null>" : (t.BaseType.FullName ?? t.BaseType.Name))); } catch { }
+            try
+            {
+                var ifaces = t.GetInterfaces();
+                foreach (var i in ifaces)
+                    Line(sb, "  IFACE " + (i.FullName ?? i.Name));
+            }
+            catch { }
+
             var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-            try
-            {
-                foreach (var p in t.GetProperties(flags))
-                {
-                    if (ContainsAny(p.Name, "record", "param", "player", "person", "profile", "panel", "data", "context", "reference", "uid")) return true;
-                    if (ContainsAny(SafeTypeName(p.PropertyType), "Record", "PersonReference", "PlayerReference", "TypedValue", "Bindings")) return true;
-                }
-            }
-            catch { }
-            try
-            {
-                foreach (var f in t.GetFields(flags))
-                {
-                    if (ContainsAny(f.Name, "record", "param", "player", "person", "profile", "panel", "data", "context", "reference", "uid")) return true;
-                    if (ContainsAny(SafeTypeName(f.FieldType), "Record", "PersonReference", "PlayerReference", "TypedValue", "Bindings")) return true;
-                }
-            }
-            catch { }
-            return false;
-        }
-
-        private static void DumpInterestingMembers(Type t, StringBuilder sb, string pad, int max)
-        {
             int n = 0;
-            var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-
             try
             {
                 foreach (var p in t.GetProperties(flags))
                 {
                     string pn = p.Name ?? "";
                     string pt = SafeTypeName(p.PropertyType);
-                    if (!ContainsAny(pn, "record", "param", "player", "person", "profile", "panel", "data", "context", "reference", "uid", "binding") &&
-                        !ContainsAny(pt, "Record", "PersonReference", "PlayerReference", "TypedValue", "Bindings", "Panel"))
-                        continue;
-                    Line(sb, pad + "PROP " + (IsStatic(p) ? "static " : "") + pn + " : " + pt);
-                    if (++n >= max) return;
+                    if (ContainsAny(pn, "uid", "id", "record", "data", "binding", "key", "param", "person", "player", "panel", "instance") ||
+                        ContainsAny(pt, "Record", "TypedValue", "Reference", "Bindings", "Key", "Panel"))
+                    {
+                        Line(sb, "  PROP " + (IsStatic(p) ? "static " : "") + pn + " : " + pt);
+                        if (++n >= 100) break;
+                    }
                 }
             }
             catch { }
@@ -220,11 +182,12 @@ namespace FM26FullPlayerProbe
                 {
                     string fn = f.Name ?? "";
                     string ft = SafeTypeName(f.FieldType);
-                    if (!ContainsAny(fn, "record", "param", "player", "person", "profile", "panel", "data", "context", "reference", "uid", "binding") &&
-                        !ContainsAny(ft, "Record", "PersonReference", "PlayerReference", "TypedValue", "Bindings", "Panel"))
-                        continue;
-                    Line(sb, pad + "FIELD " + (f.IsStatic ? "static " : "") + fn + " : " + ft);
-                    if (++n >= max) return;
+                    if (ContainsAny(fn, "uid", "id", "record", "data", "binding", "key", "param", "person", "player", "panel", "instance") ||
+                        ContainsAny(ft, "Record", "TypedValue", "Reference", "Bindings", "Key", "Panel"))
+                    {
+                        Line(sb, "  FIELD " + (f.IsStatic ? "static " : "") + fn + " : " + ft);
+                        if (++n >= 180) break;
+                    }
                 }
             }
             catch { }
@@ -234,10 +197,11 @@ namespace FM26FullPlayerProbe
                 foreach (var m in t.GetMethods(flags))
                 {
                     string mn = m.Name ?? "";
-                    if (!ContainsAny(mn, "record", "param", "player", "person", "profile", "panel", "data", "context", "reference", "uid", "binding", "open", "show"))
-                        continue;
-                    Line(sb, pad + "METHOD " + (m.IsStatic ? "static " : "") + SafeMemberString(m));
-                    if (++n >= max) return;
+                    if (ContainsAny(mn, "get_", "try", "value", "record", "data", "binding", "key", "param", "person", "player", "panel", "instance", "context"))
+                    {
+                        Line(sb, "  METHOD " + (m.IsStatic ? "static " : "") + SafeMemberString(m));
+                        if (++n >= 260) break;
+                    }
                 }
             }
             catch { }
