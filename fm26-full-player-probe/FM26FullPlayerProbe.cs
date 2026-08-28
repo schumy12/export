@@ -1,15 +1,17 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using FM.UI;
+using SI.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.19.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.20.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -18,7 +20,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.19 REAL PERSON PROPERTY PROBE - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.20 REFERENCE RESOLVER BRIDGE - press F8 after loading a save.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -31,22 +33,6 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
-        private const uint UniqueId = 1970170212u;
-        private const uint IsPlayer = 862938733u;
-        private const uint PlayerCurrentAbility = 1346584898u;
-        private const uint PlayerPotentialAbility = 1347436866u;
-        private const uint AttributeProfessionalism = 1349546607u;
-        private const uint AttributeAmbition = 1348562274u;
-        private const uint AttributePressure = 1349546597u;
-        private const uint AttributeSportsmanship = 1349742703u;
-        private const uint AttributeTemperament = 1349805421u;
-        private const uint Consistency = 1346588494u;
-        private const uint ImportantMatches = 1349086576u;
-        private const uint InjuryProneness = 1349087346u;
-        private const uint Versatility = 1349936498u;
-        private const uint AttributeAcceleration = 892805152u;
-        private const uint AttributeFinishing = 858923040u;
-
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
 
         private void Update()
@@ -65,159 +51,165 @@ namespace FM26FullPlayerProbe
         private void RunProbe()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.19 REAL PERSON PROPERTY PROBE ===");
-            sb.AppendLine("Uses property IDs discovered from PersonReference.GetPropertiesInternal().");
+            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.20 REFERENCE RESOLVER BRIDGE ===");
+            sb.AppendLine("0.19 proved PersonReference.TryGetValue is not the API that evaluates PersonReference properties.");
+            sb.AppendLine("This probe tests the TypedValue bridge used by SI.Bindable and dumps resolver metadata only.");
             sb.AppendLine();
 
-            sb.AppendLine("=== SCHEMA ACCEPTANCE ===");
-            DumpAcceptance(sb, "UniqueId", UniqueId);
-            DumpAcceptance(sb, "IsPlayer", IsPlayer);
-            DumpAcceptance(sb, "PlayerCurrentAbility", PlayerCurrentAbility);
-            DumpAcceptance(sb, "PlayerPotentialAbility", PlayerPotentialAbility);
-            DumpAcceptance(sb, "AttributeProfessionalism", AttributeProfessionalism);
-            DumpAcceptance(sb, "Consistency", Consistency);
-            DumpAcceptance(sb, "ImportantMatches", ImportantMatches);
-            DumpAcceptance(sb, "InjuryProneness", InjuryProneness);
-            DumpAcceptance(sb, "Versatility", Versatility);
-            DumpAcceptance(sb, "AttributeAcceleration", AttributeAcceleration);
+            sb.AppendLine("=== DIRECT REFERENCE -> TYPEDVALUE TEST ===");
+            int[] indices = new[] { 0, 1, 100, 1000 };
+            foreach (int index in indices)
+                TestTypedValueBridge(sb, index);
 
             sb.AppendLine();
-            sb.AppendLine("=== FIXED INDEX TESTS ===");
-            int[] fixedIndices = new[] { 0, 1, 2, 10, 100, 1000, 5000, 10000, 25000, 50000, 75000, 100000 };
-            foreach (int index in fixedIndices)
-                DumpIndex(sb, index, true);
+            sb.AppendLine("=== RESOLVER-RELATED MANAGED METADATA (NO REFLECTION GETTERS INVOKED) ===");
+            DumpNamedTypeMetadata(sb, "SI.Core.TypedValue");
+            DumpNamedTypeMetadata(sb, "SI.Core.ReferenceTypedValue");
+            DumpNamedTypeMetadata(sb, "SI.Interop.InteropReference");
+            DumpNamedTypeMetadata(sb, "SI.Interop.InteropReference+Pair");
+            DumpNamedTypeMetadata(sb, "SI.Bindable.Reference.Core.Property");
+            DumpNamedTypeMetadata(sb, "SI.Bindable.Reference.Core.PropertyID");
+            DumpNamedTypeMetadata(sb, "SI.Bindable.BindingSubsystem");
+            DumpNamedTypeMetadata(sb, "SI.Bindable.LookupDataHandler");
+            DumpNamedTypeMetadata(sb, "FM.UI.PlayerHistoryDataHandler");
 
-            sb.AppendLine();
-            sb.AppendLine("=== DIRECT PERSON TABLE SCAN 0..99999 ===");
-            int hits = 0;
-            int uniqueIdReads = 0;
-            int caReads = 0;
-            int paReads = 0;
-            int errors = 0;
-
-            for (int index = 0; index < 100000 && hits < 100; index++)
-            {
-                try
-                {
-                    var pr = new PersonReference(index);
-                    if (pr == null) continue;
-
-                    int uniqueId;
-                    if (!pr.TryGetValue(UniqueId, out uniqueId))
-                        continue;
-
-                    uniqueIdReads++;
-                    if (uniqueId <= 0) continue;
-
-                    int isPlayer;
-                    bool hasIsPlayer = pr.TryGetValue(IsPlayer, out isPlayer);
-
-                    int ca;
-                    bool hasCa = pr.TryGetValue(PlayerCurrentAbility, out ca);
-                    if (hasCa) caReads++;
-
-                    int pa;
-                    bool hasPa = pr.TryGetValue(PlayerPotentialAbility, out pa);
-                    if (hasPa) paReads++;
-
-                    hits++;
-                    sb.Append("HIT index=" + index + " uniqueId=" + uniqueId);
-                    sb.Append(" isPlayer=" + (hasIsPlayer ? isPlayer.ToString() : "<no>"));
-                    sb.Append(" CA=" + (hasCa ? ca.ToString() : "<no>"));
-                    sb.Append(" PA=" + (hasPa ? pa.ToString() : "<no>"));
-                    AppendValue(sb, pr, " Prof", AttributeProfessionalism);
-                    AppendValue(sb, pr, " Amb", AttributeAmbition);
-                    AppendValue(sb, pr, " Pressure", AttributePressure);
-                    AppendValue(sb, pr, " Sports", AttributeSportsmanship);
-                    AppendValue(sb, pr, " Temp", AttributeTemperament);
-                    AppendValue(sb, pr, " Cons", Consistency);
-                    AppendValue(sb, pr, " ImpMatches", ImportantMatches);
-                    AppendValue(sb, pr, " Injury", InjuryProneness);
-                    AppendValue(sb, pr, " Vers", Versatility);
-                    AppendValue(sb, pr, " Acc", AttributeAcceleration);
-                    AppendValue(sb, pr, " Fin", AttributeFinishing);
-                    sb.AppendLine();
-                }
-                catch (Exception ex)
-                {
-                    errors++;
-                    if (errors <= 10)
-                        sb.AppendLine("index=" + index + " ERROR " + ex.GetType().Name + " - " + ex.Message);
-                }
-            }
-
-            sb.AppendLine();
-            sb.AppendLine("SUMMARY hits=" + hits + " uniqueIdReads=" + uniqueIdReads + " caReads=" + caReads + " paReads=" + paReads + " errors=" + errors);
             Save(sb);
         }
 
-        private static void DumpAcceptance(StringBuilder sb, string name, uint id)
-        {
-            try
-            {
-                bool accepts = PersonReference.AcceptsPropertyInternal(id);
-                string kind = "?";
-                string desc = "";
-                try { kind = PersonReference.GetPropertyTypeInternal(id).ToString(); } catch { }
-                try { desc = PersonReference.GetPropertyDescriptionInternal(id) ?? ""; } catch { }
-                sb.AppendLine(name + " id=" + id + " accepts=" + accepts + " kind=" + kind + " desc='" + desc + "'");
-            }
-            catch (Exception ex)
-            {
-                sb.AppendLine(name + " id=" + id + " acceptance failed: " + ex.GetType().Name + " - " + ex.Message);
-            }
-        }
-
-        private static void DumpIndex(StringBuilder sb, int index, bool includeHidden)
+        private static void TestTypedValueBridge(StringBuilder sb, int index)
         {
             try
             {
                 var pr = new PersonReference(index);
                 if (pr == null)
                 {
-                    sb.AppendLine("INDEX " + index + " -> <null>");
+                    sb.AppendLine("INDEX " + index + " PersonReference=<null>");
                     return;
                 }
 
-                int uid;
-                bool hasUid = pr.TryGetValue(UniqueId, out uid);
-                int isPlayer;
-                bool hasPlayer = pr.TryGetValue(IsPlayer, out isPlayer);
-                int ca;
-                bool hasCa = pr.TryGetValue(PlayerCurrentAbility, out ca);
-                int pa;
-                bool hasPa = pr.TryGetValue(PlayerPotentialAbility, out pa);
-
-                sb.Append("INDEX " + index + " uniqueId=" + (hasUid ? uid.ToString() : "<no>"));
-                sb.Append(" isPlayer=" + (hasPlayer ? isPlayer.ToString() : "<no>"));
-                sb.Append(" CA=" + (hasCa ? ca.ToString() : "<no>"));
-                sb.Append(" PA=" + (hasPa ? pa.ToString() : "<no>"));
-                if (includeHidden)
+                var tv = TypedValue.GetReferenceTypedValue();
+                if (tv == null)
                 {
-                    AppendValue(sb, pr, " Prof", AttributeProfessionalism);
-                    AppendValue(sb, pr, " Cons", Consistency);
-                    AppendValue(sb, pr, " Acc", AttributeAcceleration);
+                    sb.AppendLine("INDEX " + index + " GetReferenceTypedValue=<null>");
+                    return;
                 }
-                sb.AppendLine();
+
+                string beforeType = SafeDataType(tv);
+                string beforeText = SafeAsString(tv);
+                sb.AppendLine("INDEX " + index + " before SetValue tvPtr=0x" + tv.Pointer.ToString("X") + " type=" + beforeType + " text='" + beforeText + "'");
+
+                try
+                {
+                    tv.SetValue(pr);
+                    sb.AppendLine("INDEX " + index + " SetValue(PersonReference)=OK");
+                }
+                catch (Exception ex)
+                {
+                    sb.AppendLine("INDEX " + index + " SetValue(PersonReference) failed: " + ex.GetType().Name + " - " + ex.Message);
+                    return;
+                }
+
+                string afterType = SafeDataType(tv);
+                string afterText = SafeAsString(tv);
+                sb.AppendLine("INDEX " + index + " after SetValue type=" + afterType + " text='" + afterText + "' prData1=" + Safe(() => pr.Data1.ToString()) + " prID='" + Safe(() => pr.ID.ToString()) + "'");
             }
             catch (Exception ex)
             {
-                sb.AppendLine("INDEX " + index + " failed: " + ex.GetType().Name + " - " + ex.Message);
+                sb.AppendLine("INDEX " + index + " bridge failed: " + ex.GetType().Name + " - " + ex.Message);
             }
         }
 
-        private static void AppendValue(StringBuilder sb, PersonReference pr, string label, uint propertyId)
+        private static string SafeDataType(TypedValue tv)
+        {
+            try { return tv.DataType == null ? "<null>" : tv.DataType.FullName; }
+            catch (Exception ex) { return "<" + ex.GetType().Name + ">"; }
+        }
+
+        private static string SafeAsString(TypedValue tv)
+        {
+            try { return tv.AsString() ?? ""; }
+            catch (Exception ex) { return "<" + ex.GetType().Name + ": " + ex.Message + ">"; }
+        }
+
+        private static string Safe(Func<string> fn)
+        {
+            try { return fn(); }
+            catch (Exception ex) { return "<" + ex.GetType().Name + ": " + ex.Message + ">"; }
+        }
+
+        private static void DumpNamedTypeMetadata(StringBuilder sb, string fullName)
+        {
+            Type t = null;
+            foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                try
+                {
+                    t = a.GetType(fullName, false);
+                    if (t != null) break;
+                }
+                catch { }
+            }
+
+            if (t == null)
+            {
+                sb.AppendLine("TYPE NOT FOUND " + fullName);
+                return;
+            }
+
+            DumpTypeMetadata(sb, t);
+        }
+
+        private static void DumpTypeMetadata(StringBuilder sb, Type t)
+        {
+            sb.AppendLine("TYPE " + (t.FullName ?? t.Name));
+            try { sb.AppendLine("  BaseType=" + (t.BaseType == null ? "<null>" : (t.BaseType.FullName ?? t.BaseType.Name))); } catch { }
+
+            var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+
+            try
+            {
+                foreach (var p in t.GetProperties(flags))
+                    sb.AppendLine("  PROP " + (IsStatic(p) ? "static " : "") + p.Name + " : " + SafeTypeName(p.PropertyType));
+            }
+            catch (Exception ex) { sb.AppendLine("  properties failed: " + ex.GetType().Name); }
+
+            try
+            {
+                foreach (var f in t.GetFields(flags))
+                    sb.AppendLine("  FIELD " + (f.IsStatic ? "static " : "") + f.Name + " : " + SafeTypeName(f.FieldType));
+            }
+            catch (Exception ex) { sb.AppendLine("  fields failed: " + ex.GetType().Name); }
+
+            try
+            {
+                foreach (var m in t.GetMethods(flags))
+                    sb.AppendLine("  METHOD " + (m.IsStatic ? "static " : "") + SafeMemberString(m));
+            }
+            catch (Exception ex) { sb.AppendLine("  methods failed: " + ex.GetType().Name); }
+        }
+
+        private static bool IsStatic(PropertyInfo p)
         {
             try
             {
-                int value;
-                bool ok = pr.TryGetValue(propertyId, out value);
-                sb.Append(label + "=" + (ok ? value.ToString() : "<no>"));
+                var g = p.GetGetMethod(true);
+                if (g != null) return g.IsStatic;
+                var s = p.GetSetMethod(true);
+                return s != null && s.IsStatic;
             }
-            catch (Exception ex)
-            {
-                sb.Append(label + "=<" + ex.GetType().Name + ">");
-            }
+            catch { return false; }
+        }
+
+        private static string SafeTypeName(Type t)
+        {
+            try { return t == null ? "?" : (t.FullName ?? t.Name); }
+            catch { return "?"; }
+        }
+
+        private static string SafeMemberString(MethodBase m)
+        {
+            try { return m == null ? "?" : m.ToString(); }
+            catch { return m == null ? "?" : m.Name; }
         }
 
         private static void Save(StringBuilder sb)
@@ -226,7 +218,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "realpersonprobe_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "resolverbridge_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
