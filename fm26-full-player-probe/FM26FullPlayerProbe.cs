@@ -6,12 +6,10 @@ using BepInEx;
 using BepInEx.Unity.IL2CPP;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using FM.UI;
-using SI.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.20.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.21.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -20,7 +18,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.20 REFERENCE RESOLVER BRIDGE - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.21 RESOLVER HANDLER CENSUS - press F8 after loading a save.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -51,90 +49,118 @@ namespace FM26FullPlayerProbe
         private void RunProbe()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.20 REFERENCE RESOLVER BRIDGE ===");
-            sb.AppendLine("0.19 proved PersonReference.TryGetValue is not the API that evaluates PersonReference properties.");
-            sb.AppendLine("This probe tests the TypedValue bridge used by SI.Bindable and dumps resolver metadata only.");
+            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.21 RESOLVER HANDLER CENSUS ===");
+            sb.AppendLine("0.20 proved PersonReference can be carried inside SI.Core.TypedValue.");
+            sb.AppendLine("This probe identifies the concrete IDataHandler/LookupDataHandler classes that can resolve player/person properties.");
+            sb.AppendLine("Metadata reflection only: no generated FM/SI property getters invoked.");
             sb.AppendLine();
 
-            sb.AppendLine("=== DIRECT REFERENCE -> TYPEDVALUE TEST ===");
-            int[] indices = new[] { 0, 1, 100, 1000 };
-            foreach (int index in indices)
-                TestTypedValueBridge(sb, index);
-
-            sb.AppendLine();
-            sb.AppendLine("=== RESOLVER-RELATED MANAGED METADATA (NO REFLECTION GETTERS INVOKED) ===");
-            DumpNamedTypeMetadata(sb, "SI.Core.TypedValue");
-            DumpNamedTypeMetadata(sb, "SI.Core.ReferenceTypedValue");
-            DumpNamedTypeMetadata(sb, "SI.Interop.InteropReference");
-            DumpNamedTypeMetadata(sb, "SI.Interop.InteropReference+Pair");
-            DumpNamedTypeMetadata(sb, "SI.Bindable.Reference.Core.Property");
-            DumpNamedTypeMetadata(sb, "SI.Bindable.Reference.Core.PropertyID");
-            DumpNamedTypeMetadata(sb, "SI.Bindable.BindingSubsystem");
+            DumpNamedTypeMetadata(sb, "SI.Bindable.Property");
+            DumpNamedTypeMetadata(sb, "SI.Bindable.PropertyHandler");
+            DumpNamedTypeMetadata(sb, "SI.Bindable.IDataHandler");
             DumpNamedTypeMetadata(sb, "SI.Bindable.LookupDataHandler");
-            DumpNamedTypeMetadata(sb, "FM.UI.PlayerHistoryDataHandler");
+            DumpNamedTypeMetadata(sb, "SI.Bindable.Bindings+HandlerAccess");
+
+            sb.AppendLine();
+            sb.AppendLine("=== LOOKUPDATAHANDLER / IDATAHANDLER TYPE CENSUS ===");
+            int matched = 0;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types = null;
+                try { types = asm.GetTypes(); }
+                catch (ReflectionTypeLoadException rtle) { types = rtle.Types; }
+                catch { }
+                if (types == null) continue;
+
+                foreach (var t in types)
+                {
+                    if (t == null) continue;
+                    if (!IsHandlerType(t)) continue;
+                    matched++;
+                    sb.AppendLine("HANDLER TYPE " + (t.FullName ?? t.Name) + " base=" + SafeTypeName(t.BaseType));
+                }
+            }
+            sb.AppendLine("handlerTypeCount=" + matched);
+
+            sb.AppendLine();
+            sb.AppendLine("=== PLAYER/PERSON/ABILITY/ATTRIBUTE/REPORT HANDLER DETAILS ===");
+            int detailed = 0;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types = null;
+                try { types = asm.GetTypes(); }
+                catch (ReflectionTypeLoadException rtle) { types = rtle.Types; }
+                catch { }
+                if (types == null) continue;
+
+                foreach (var t in types)
+                {
+                    if (t == null || !IsHandlerType(t)) continue;
+                    string n = t.FullName ?? t.Name;
+                    if (!LooksRelevant(n)) continue;
+                    detailed++;
+                    DumpTypeMetadata(sb, t);
+                }
+            }
+            sb.AppendLine("detailedHandlerCount=" + detailed);
+
+            sb.AppendLine();
+            sb.AppendLine("=== NON-HANDLER TYPES WITH STRONG RESOLVER NAMES ===");
+            int resolverTypes = 0;
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types = null;
+                try { types = asm.GetTypes(); }
+                catch (ReflectionTypeLoadException rtle) { types = rtle.Types; }
+                catch { }
+                if (types == null) continue;
+
+                foreach (var t in types)
+                {
+                    if (t == null) continue;
+                    string n = t.FullName ?? t.Name;
+                    string low = n.ToLowerInvariant();
+                    if (!(low.Contains("person") || low.Contains("player"))) continue;
+                    if (!(low.Contains("resolver") || low.Contains("lookup") || low.Contains("property") || low.Contains("datahandler") || low.Contains("referencehandler"))) continue;
+                    if (IsHandlerType(t)) continue;
+                    resolverTypes++;
+                    sb.AppendLine("RESOLVER-LIKE TYPE " + n + " base=" + SafeTypeName(t.BaseType));
+                }
+            }
+            sb.AppendLine("resolverLikeTypeCount=" + resolverTypes);
 
             Save(sb);
         }
 
-        private static void TestTypedValueBridge(StringBuilder sb, int index)
+        private static bool IsHandlerType(Type t)
         {
             try
             {
-                var pr = new PersonReference(index);
-                if (pr == null)
+                Type cur = t;
+                while (cur != null)
                 {
-                    sb.AppendLine("INDEX " + index + " PersonReference=<null>");
-                    return;
+                    string n = cur.FullName ?? cur.Name;
+                    if (n == "SI.Bindable.LookupDataHandler") return true;
+                    cur = cur.BaseType;
                 }
 
-                var tv = TypedValue.GetReferenceTypedValue();
-                if (tv == null)
+                foreach (var i in t.GetInterfaces())
                 {
-                    sb.AppendLine("INDEX " + index + " GetReferenceTypedValue=<null>");
-                    return;
+                    string n = i.FullName ?? i.Name;
+                    if (n == "SI.Bindable.IDataHandler") return true;
                 }
-
-                string beforeType = SafeDataType(tv);
-                string beforeText = SafeAsString(tv);
-                sb.AppendLine("INDEX " + index + " before SetValue tvPtr=0x" + tv.Pointer.ToString("X") + " type=" + beforeType + " text='" + beforeText + "'");
-
-                try
-                {
-                    tv.SetValue(pr);
-                    sb.AppendLine("INDEX " + index + " SetValue(PersonReference)=OK");
-                }
-                catch (Exception ex)
-                {
-                    sb.AppendLine("INDEX " + index + " SetValue(PersonReference) failed: " + ex.GetType().Name + " - " + ex.Message);
-                    return;
-                }
-
-                string afterType = SafeDataType(tv);
-                string afterText = SafeAsString(tv);
-                sb.AppendLine("INDEX " + index + " after SetValue type=" + afterType + " text='" + afterText + "' prData1=" + Safe(() => pr.Data1.ToString()) + " prID='" + Safe(() => pr.ID.ToString()) + "'");
             }
-            catch (Exception ex)
-            {
-                sb.AppendLine("INDEX " + index + " bridge failed: " + ex.GetType().Name + " - " + ex.Message);
-            }
+            catch { }
+            return false;
         }
 
-        private static string SafeDataType(TypedValue tv)
+        private static bool LooksRelevant(string n)
         {
-            try { return tv.DataType == null ? "<null>" : tv.DataType.FullName; }
-            catch (Exception ex) { return "<" + ex.GetType().Name + ">"; }
-        }
-
-        private static string SafeAsString(TypedValue tv)
-        {
-            try { return tv.AsString() ?? ""; }
-            catch (Exception ex) { return "<" + ex.GetType().Name + ": " + ex.Message + ">"; }
-        }
-
-        private static string Safe(Func<string> fn)
-        {
-            try { return fn(); }
-            catch (Exception ex) { return "<" + ex.GetType().Name + ": " + ex.Message + ">"; }
+            if (string.IsNullOrEmpty(n)) return false;
+            string low = n.ToLowerInvariant();
+            return low.Contains("player") || low.Contains("person") || low.Contains("ability") ||
+                   low.Contains("attribute") || low.Contains("report") || low.Contains("database") ||
+                   low.Contains("scout") || low.Contains("reference");
         }
 
         private static void DumpNamedTypeMetadata(StringBuilder sb, string fullName)
@@ -149,23 +175,21 @@ namespace FM26FullPlayerProbe
                 }
                 catch { }
             }
-
             if (t == null)
             {
                 sb.AppendLine("TYPE NOT FOUND " + fullName);
                 return;
             }
-
             DumpTypeMetadata(sb, t);
         }
 
         private static void DumpTypeMetadata(StringBuilder sb, Type t)
         {
+            if (t == null) return;
             sb.AppendLine("TYPE " + (t.FullName ?? t.Name));
-            try { sb.AppendLine("  BaseType=" + (t.BaseType == null ? "<null>" : (t.BaseType.FullName ?? t.BaseType.Name))); } catch { }
+            try { sb.AppendLine("  BaseType=" + SafeTypeName(t.BaseType)); } catch { }
 
             var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-
             try
             {
                 foreach (var p in t.GetProperties(flags))
@@ -202,7 +226,7 @@ namespace FM26FullPlayerProbe
 
         private static string SafeTypeName(Type t)
         {
-            try { return t == null ? "?" : (t.FullName ?? t.Name); }
+            try { return t == null ? "<null>" : (t.FullName ?? t.Name); }
             catch { return "?"; }
         }
 
@@ -218,7 +242,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "resolverbridge_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "handlercensus_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
