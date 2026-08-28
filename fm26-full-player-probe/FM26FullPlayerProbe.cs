@@ -9,7 +9,7 @@ using UnityEngine.InputSystem;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.22.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.23.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -18,7 +18,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.22 TARGETED RESOLVER METADATA - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.23 INTEROP RESOLVER PATH - press F8 after loading a save.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -49,31 +49,32 @@ namespace FM26FullPlayerProbe
         private void RunProbe()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.22 TARGETED RESOLVER METADATA ===");
-            sb.AppendLine("Goal: identify the actual generic/game-data resolver for PersonReference properties.");
+            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.23 INTEROP RESOLVER PATH ===");
+            sb.AppendLine("0.22 exposed FM.UI.InteropDataHandler -> FM.GamePlugin.GameInteropSubsystem and Bindings.GetHandler().");
             sb.AppendLine("Metadata reflection only. No generated FM/SI getters invoked.");
             sb.AppendLine();
 
             string[] targets = new[]
             {
-                "FM.UI.GameDataRequestHandler",
-                "FM.UI.ApplicationDataRequestHandler",
-                "FM.UI.StaticDataRequestHandler",
-                "FM.UI.IGEDataHandler",
-                "FM.UI.GameCreationPersonLookupDataReference",
-                "FM.UI.PersonReference",
-                "FM.UI.DatabaseRecordReference",
-                "SI.Bindable.LookupDataHandler",
-                "SI.Bindable.PropertyHandler"
+                "FM.UI.InteropDataHandler",
+                "FM.GamePlugin.GameInteropSubsystem",
+                "FM.GamePlugin.ValueChangedWithSizeCallback",
+                "SI.Bindable.Bindings",
+                "SI.Bindable.Bindings+OpenRequest",
+                "SI.Bindable.Property",
+                "SI.Bindable.IDataHandler",
+                "SI.Bindable.Reference.Core.IDataReference",
+                "SI.Interop.InteropReference",
+                "FM.UI.PersonReference"
             };
 
-            foreach (string t in targets)
+            foreach (string target in targets)
             {
-                DumpNamedTypeMetadata(sb, t);
+                DumpNamedTypeMetadata(sb, target);
                 sb.AppendLine();
             }
 
-            sb.AppendLine("=== TYPES REFERENCING PersonReference OR PropertyHandler IN MEMBERS ===");
+            sb.AppendLine("=== TYPES WITH METHODS REFERENCING GameInteropSubsystem / InteropDataHandler / IDataReference ===");
             int count = 0;
             foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
             {
@@ -86,30 +87,33 @@ namespace FM26FullPlayerProbe
                 foreach (var t in types)
                 {
                     if (t == null) continue;
-                    if (!TypeReferencesInterestingMember(t)) continue;
+                    if (!ReferencesInteropPath(t)) continue;
                     count++;
-                    sb.AppendLine("INTERESTING TYPE " + (t.FullName ?? t.Name) + " base=" + SafeTypeName(t.BaseType));
+                    sb.AppendLine("INTEROP TYPE " + (t.FullName ?? t.Name) + " assembly=" + (t.Assembly == null ? "?" : t.Assembly.GetName().Name));
                     DumpMethodsOnly(sb, t);
                 }
             }
-            sb.AppendLine("interestingTypeCount=" + count);
+            sb.AppendLine("interopRelatedTypeCount=" + count);
 
             Save(sb);
         }
 
-        private static bool TypeReferencesInterestingMember(Type t)
+        private static bool ReferencesInteropPath(Type t)
         {
             try
             {
-                string tn = (t.FullName ?? t.Name).ToLowerInvariant();
-                if (tn.Contains("personreference") || tn.Contains("gamedatarequest") || tn.Contains("lookupdatareference"))
-                    return true;
+                string tn = t.FullName ?? t.Name;
+                if (tn == "FM.UI.InteropDataHandler" || tn == "FM.GamePlugin.GameInteropSubsystem") return true;
 
                 var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
                 foreach (var m in t.GetMethods(flags))
                 {
                     string s = SafeMemberString(m);
-                    if (s.Contains("FM.UI.PersonReference") || s.Contains("SI.Bindable.PropertyHandler") || s.Contains("SI.Core.TypedValue, Property"))
+                    if (s.Contains("GameInteropSubsystem") ||
+                        s.Contains("InteropDataHandler") ||
+                        s.Contains("IDataReference") ||
+                        s.Contains("PersonReference") ||
+                        s.Contains("ValueChangedWithSizeCallback"))
                         return true;
                 }
             }
@@ -195,7 +199,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "targetedresolver_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "interopresolver_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
