@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>FM26FullPlayerProbe</AssemblyName>
+    <OutputType>Library</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <FM26Path Condition="'$(FM26Path)'==''">E:\SteamLibrary\steamapps\common\Football Manager 26</FM26Path>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="BepInEx.Core">
+      <HintPath>$(FM26Path)\BepInEx\core\BepInEx.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="BepInEx.Unity.IL2CPP">
+      <HintPath>$(FM26Path)\BepInEx\core\BepInEx.Unity.IL2CPP.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Il2CppInterop.Runtime">
+      <HintPath>$(FM26Path)\BepInEx\core\Il2CppInterop.Runtime.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(FM26Path)\BepInEx\interop\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.UIElementsModule">
+      <HintPath>$(FM26Path)\BepInEx\interop\UnityEngine.UIElementsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Unity.InputSystem">
+      <HintPath>$(FM26Path)\BepInEx\interop\Unity.InputSystem.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FM.UI">
+      <HintPath>$(FM26Path)\BepInEx\interop\FM.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="FMGame">
+      <HintPath>$(FM26Path)\BepInEx\interop\FMGame.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SI.Core">
+      <HintPath>$(FM26Path)\BepInEx\interop\SI.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="SI.Bindable">
+      <HintPath>$(FM26Path)\BepInEx\interop\SI.Bindable.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
