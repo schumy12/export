@@ -10,7 +10,7 @@ using UnityEngine.UIElements;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.6.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.7.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -18,7 +18,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.6 - F7 = selected-player handler probe");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.7 - F7 = selected-player data pipeline probe");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -41,7 +41,7 @@ namespace FM26FullPlayerProbe
         private void Probe()
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.6 SELECTED PLAYER ===");
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.7 DATA PIPELINE ===");
 
             var root = MainRoot();
             if (root != null)
@@ -62,11 +62,7 @@ namespace FM26FullPlayerProbe
                         bool selected = false;
                         try { selected = row.ClassListContains("virtualised-list__item--selected"); } catch { }
                         Line(sb, "ROW " + i + " selected=" + selected);
-                        if (selected && selectedRow == null)
-                        {
-                            selectedRow = row;
-                            selectedIndex = i;
-                        }
+                        if (selected && selectedRow == null) { selectedRow = row; selectedIndex = i; }
                     }
 
                     if (selectedRow != null)
@@ -77,38 +73,41 @@ namespace FM26FullPlayerProbe
                         Line(sb, "Selected ShowPerson=" + (show != null));
                         if (show != null)
                         {
-                            DumpElementContext(show, sb, "  ShowPerson");
+                            DumpElementContext(show, sb, "ShowPerson");
                             DumpAncestors(show, sb);
                         }
                     }
-                    else
-                    {
-                        Line(sb, "ERROR: no single selected row marker found. Select exactly one player before F7.");
-                    }
+                    else Line(sb, "ERROR: no single selected row marker found. Select exactly one player before F7.");
                 }
                 else Line(sb, "Player table/View not found; continuing with type metadata.");
             }
             else Line(sb, "Main UI root not found; continuing with type metadata.");
 
-            Line(sb, "\n=== EXACT KEY TYPES ===");
-            DumpExactType(sb, "FM.UI.EmbeddedDataHandler");
-            DumpExactType(sb, "FM.UI.EmbeddedDataHandler+PersonReferenceClickedHandler");
-            DumpExactType(sb, "FM.UI.EmbeddedDataHandler+DataReferenceHandlerBase");
-            DumpExactType(sb, "FM.UI.EmbeddedDataHandler+DataReferenceHandlerBase+DataRequest");
-            DumpExactType(sb, "FM.UI.PersonReference");
-            DumpExactType(sb, "FM.UI.IPlayerReference");
-            DumpExactType(sb, "FM.UI.PlayerAttributeReference");
-            DumpExactType(sb, "FM.UI.AttributeNameAndValueReference");
-            DumpExactType(sb, "FM.UI.AttributeValueReference");
-            DumpExactType(sb, "FM.UI.PlayerReportScoutedAbilityReference");
-            DumpExactType(sb, "SI.Bindable.Bindings");
-            DumpExactType(sb, "SI.Core.TypedValue");
+            Line(sb, "\n=== CLICK/DATA PIPELINE TYPES ===");
+            string[] exact = {
+                "SI.Bindable.EmbeddedDataClickedEvent",
+                "SI.Core.Record",
+                "SI.Core.TypedValue",
+                "SI.Core.ReferenceTypedValue",
+                "SI.Core.NumericTypedValue",
+                "SI.Bindable.BindingSubsystem",
+                "SI.Bindable.Bindings+Key",
+                "SI.Bindable.Bindings+Data",
+                "FM.UI.EmbeddedDataHandler",
+                "FM.UI.EmbeddedDataHandler+PersonReferenceClickedHandler",
+                "FM.UI.EmbeddedDataHandler+DataReferenceHandlerBase",
+                "FM.UI.EmbeddedDataHandler+DataReferenceHandlerBase+DataRequest",
+                "FM.UI.PersonReference",
+                "FM.UI.IPlayerReference",
+                "FM.UI.PlayerAttributeReference"
+            };
+            foreach (var n in exact) DumpExactType(sb, n);
 
-            Line(sb, "\n=== FM.UI HANDLER/REFERENCE TYPE MATCHES ===");
-            DumpFMTypeMatches(sb, new[] {
-                "EmbeddedDataHandler", "PersonReferenceClickedHandler", "DataReferenceHandler",
-                "ReferenceDataHandler", "BindDataHandler", "PersonReference", "PlayerReference"
-            }, 220);
+            Line(sb, "\n=== RELATED TYPE MATCHES ===");
+            DumpTypeMatches(sb, new[] {
+                "EmbeddedDataClickedEvent", "ReferenceTypedValue", "NumericTypedValue",
+                "Record", "TypedValue", "BindingSubsystem", "PersonReferenceClickedHandler"
+            }, 180);
 
             Save(sb);
         }
@@ -125,52 +124,33 @@ namespace FM26FullPlayerProbe
 
         private static void DumpExactType(StringBuilder sb, string fullName)
         {
-            Type found = null;
-            string asmName = "";
+            Type found = null; string asmName = "";
             foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
             {
-                try
-                {
-                    var t = a.GetType(fullName, false);
-                    if (t != null) { found = t; asmName = a.GetName().Name ?? ""; break; }
-                }
+                try { var t = a.GetType(fullName, false); if (t != null) { found = t; asmName = a.GetName().Name ?? ""; break; } }
                 catch { }
             }
             if (found == null) { Line(sb, "TYPE NOT FOUND " + fullName); return; }
             Line(sb, "TYPE " + asmName + ": " + found.FullName);
             DumpTypeMetadata(found, sb, "  ", true);
-            try
-            {
-                foreach (var nt in found.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic))
-                    Line(sb, "  NESTED " + nt.FullName);
-            }
-            catch { }
+            try { foreach (var nt in found.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic)) Line(sb, "  NESTED " + nt.FullName); } catch { }
         }
 
-        private static void DumpFMTypeMatches(StringBuilder sb, string[] needles, int max)
+        private static void DumpTypeMatches(StringBuilder sb, string[] needles, int max)
         {
             int count = 0;
             foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
             {
-                string an = "";
-                try { an = a.GetName().Name ?? ""; } catch { continue; }
+                string an = ""; try { an = a.GetName().Name ?? ""; } catch { continue; }
                 if (!(an.StartsWith("FM") || an.StartsWith("SI"))) continue;
-
-                Type[] types;
-                try { types = a.GetTypes(); }
-                catch (ReflectionTypeLoadException e) { types = e.Types; }
-                catch { continue; }
+                Type[] types; try { types = a.GetTypes(); } catch (ReflectionTypeLoadException e) { types = e.Types; } catch { continue; }
                 if (types == null) continue;
-
                 foreach (var t in types)
                 {
                     if (t == null) continue;
-                    string fn = t.FullName ?? "";
-                    bool ok = false;
-                    foreach (var n in needles)
-                        if (fn.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0) { ok = true; break; }
+                    string fn = t.FullName ?? ""; bool ok = false;
+                    foreach (var n in needles) if (fn.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0) { ok = true; break; }
                     if (!ok) continue;
-
                     Line(sb, "TYPE " + an + ": " + fn);
                     DumpTypeMetadata(t, sb, "  ", false);
                     if (++count >= max) return;
@@ -181,24 +161,9 @@ namespace FM26FullPlayerProbe
         private static void DumpTypeMetadata(Type t, StringBuilder sb, string pad, bool allMethods)
         {
             var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-            try
-            {
-                foreach (var p in t.GetProperties(flags))
-                    Line(sb, pad + "PROP " + p.Name + " : " + SafeTypeName(p.PropertyType));
-            }
-            catch { }
-            try
-            {
-                foreach (var f in t.GetFields(flags))
-                    Line(sb, pad + "FIELD " + f.Name + " : " + SafeTypeName(f.FieldType));
-            }
-            catch { }
-            try
-            {
-                foreach (var c in t.GetConstructors(flags))
-                    Line(sb, pad + "CTOR " + SafeMemberString(c));
-            }
-            catch { }
+            try { foreach (var p in t.GetProperties(flags)) Line(sb, pad + "PROP " + p.Name + " : " + SafeTypeName(p.PropertyType)); } catch { }
+            try { foreach (var f in t.GetFields(flags)) Line(sb, pad + "FIELD " + f.Name + " : " + SafeTypeName(f.FieldType)); } catch { }
+            try { foreach (var c in t.GetConstructors(flags)) Line(sb, pad + "CTOR " + SafeMemberString(c)); } catch { }
             try
             {
                 foreach (var m in t.GetMethods(flags))
@@ -215,7 +180,8 @@ namespace FM26FullPlayerProbe
             string n = (s ?? "").ToLowerInvariant();
             return n.Contains("bind") || n.Contains("data") || n.Contains("person") || n.Contains("player") ||
                    n.Contains("value") || n.Contains("reference") || n.Contains("context") || n.Contains("property") ||
-                   n.Contains("request") || n.Contains("click") || n.Contains("resolve") || n.Contains("setup");
+                   n.Contains("request") || n.Contains("click") || n.Contains("resolve") || n.Contains("record") ||
+                   n.Contains("type") || n.Contains("get") || n.Contains("set");
         }
 
         private static string SafeMemberString(MethodBase m)
@@ -243,8 +209,7 @@ namespace FM26FullPlayerProbe
                 var docs = FindObjectsOfType<UIDocument>();
                 foreach (var doc in docs)
                 {
-                    if (doc == null) continue;
-                    VisualElement r = null; try { r = doc.rootVisualElement; } catch { }
+                    if (doc == null) continue; VisualElement r = null; try { r = doc.rootVisualElement; } catch { }
                     if (r != null && SafeName(r) == "PanelManager-container") return r;
                 }
             }
@@ -254,14 +219,9 @@ namespace FM26FullPlayerProbe
 
         private static VisualElement Find(VisualElement root, string name)
         {
-            if (root == null) return null;
-            if (SafeName(root) == name) return root;
+            if (root == null) return null; if (SafeName(root) == name) return root;
             int n = SafeChildCount(root);
-            for (int i = 0; i < n; i++)
-            {
-                VisualElement c = null; try { c = root.ElementAt(i); } catch { }
-                var x = Find(c, name); if (x != null) return x;
-            }
+            for (int i = 0; i < n; i++) { VisualElement c = null; try { c = root.ElementAt(i); } catch { } var x = Find(c, name); if (x != null) return x; }
             return null;
         }
 
