@@ -58,5 +58,9 @@
       <HintPath>$(FM26Path)\BepInEx\interop\SI.Bindable.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="SI.Interop">
+      <HintPath>$(FM26Path)\BepInEx\interop\SI.Interop.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 </Project>
