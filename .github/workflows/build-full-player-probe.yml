@@ -1,0 +1,47 @@
+name: Build FM26 Full Player Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "fm26-full-player-probe/**"
+      - ".github/workflows/build-full-player-probe.yml"
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "6.0.x"
+
+      - name: Fetch FM26 BepInEx reference assemblies
+        shell: pwsh
+        run: |
+          git clone --depth 1 https://github.com/contatovinteset-wq/fm26-editor-workspace.git deps
+          if (-not (Test-Path "deps/BepInEx/core/BepInEx.Core.dll")) { throw "BepInEx.Core.dll not found" }
+          if (-not (Test-Path "deps/BepInEx/interop/FM.UI.dll")) { throw "FM.UI.dll not found" }
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $deps = (Resolve-Path "deps").Path
+          dotnet build "fm26-full-player-probe/FM26FullPlayerProbe.csproj" -c Release -p:FM26Path="$deps"
+
+      - name: Collect DLL
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path artifact | Out-Null
+          Copy-Item "fm26-full-player-probe/bin/Release/net6.0/FM26FullPlayerProbe.dll" "artifact/FM26FullPlayerProbe.dll"
+
+      - name: Upload DLL artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FM26FullPlayerProbe
+          path: artifact/FM26FullPlayerProbe.dll
+          if-no-files-found: error
