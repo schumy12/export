@@ -7,10 +7,11 @@ using BepInEx.Unity.IL2CPP;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using FM.UI;
+using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.17.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.18.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -19,7 +20,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.17 PERSON REFERENCE SEMANTICS - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.18 PERSON PROPERTY SCHEMA - press F8 after loading a save.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -50,129 +51,90 @@ namespace FM26FullPlayerProbe
         private void RunProbe()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.17 PERSON REFERENCE SEMANTICS ===");
-            sb.AppendLine("Previous result established that PersonReference(int index) already packs DatabaseTableType.Person automatically.");
-            sb.AppendLine("PersonReference.UID schema key=" + PersonReference.UID);
+            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.18 PERSON PROPERTY SCHEMA ===");
+            sb.AppendLine("Goal: determine whether PersonReference.UID is a reference-type identifier or an actual readable person property.");
+            sb.AppendLine("PersonReference.UID=" + PersonReference.UID);
+            sb.AppendLine("PersonReference.Identifier=" + Safe(() => PersonReference.Identifier.ToString()));
             sb.AppendLine();
 
-            sb.AppendLine("=== KNOWN STATIC / SINGLETON SHAPE ===");
-            try { sb.AppendLine("PersonReference.Identifier=" + PersonReference.Identifier.ToString()); }
-            catch (Exception ex) { sb.AppendLine("Identifier failed: " + ex.GetType().Name + " - " + ex.Message); }
+            sb.AppendLine("=== UID SCHEMA TEST ===");
+            try { sb.AppendLine("AcceptsPropertyInternal(UID)=" + PersonReference.AcceptsPropertyInternal(PersonReference.UID)); }
+            catch (Exception ex) { sb.AppendLine("AcceptsPropertyInternal(UID) failed: " + ex.GetType().Name + " - " + ex.Message); }
+
+            try { sb.AppendLine("GetPropertyTypeInternal(UID)=" + PersonReference.GetPropertyTypeInternal(PersonReference.UID)); }
+            catch (Exception ex) { sb.AppendLine("GetPropertyTypeInternal(UID) failed: " + ex.GetType().Name + " - " + ex.Message); }
+
+            try { sb.AppendLine("GetPropertyDescriptionInternal(UID)='" + (PersonReference.GetPropertyDescriptionInternal(PersonReference.UID) ?? "") + "'"); }
+            catch (Exception ex) { sb.AppendLine("GetPropertyDescriptionInternal(UID) failed: " + ex.GetType().Name + " - " + ex.Message); }
+
+            try { sb.AppendLine("GetPropertyCountInternal()=" + PersonReference.GetPropertyCountInternal()); }
+            catch (Exception ex) { sb.AppendLine("GetPropertyCountInternal failed: " + ex.GetType().Name + " - " + ex.Message); }
+
+            sb.AppendLine();
+            sb.AppendLine("=== PERSONREFERENCE PROPERTY LIST ===");
+            DumpPropertyList(sb);
+
+            sb.AppendLine();
+            sb.AppendLine("=== REFERENCE RELATION TESTS ===");
+            try { sb.AppendLine("PersonReference.DerivesFromInternal(PersonReference.UID)=" + PersonReference.DerivesFromInternal(PersonReference.UID)); }
+            catch (Exception ex) { sb.AppendLine("PersonReference.DerivesFromInternal(UID) failed: " + ex.GetType().Name + " - " + ex.Message); }
 
             try
             {
-                var inst = PersonReference.GetInstance();
-                if (inst == null)
-                    sb.AppendLine("PersonReference.GetInstance()=<null>");
-                else
-                    DumpReference(sb, inst, "GetInstance");
+                uint playerUid = GetReferenceUidFromIdentifier(IPlayerReference.Identifier.ToString());
+                sb.AppendLine("IPlayerReference.Identifier=" + IPlayerReference.Identifier.ToString());
+                sb.AppendLine("IPlayerReference parsed UID=" + playerUid);
+                if (playerUid != 0)
+                    sb.AppendLine("PersonReference.DerivesFromInternal(IPlayerReference UID)=" + PersonReference.DerivesFromInternal(playerUid));
             }
             catch (Exception ex)
             {
-                sb.AppendLine("PersonReference.GetInstance failed: " + ex.GetType().Name + " - " + ex.Message);
+                sb.AppendLine("IPlayerReference relation test failed: " + ex.GetType().Name + " - " + ex.Message);
             }
 
             sb.AppendLine();
-            sb.AppendLine("=== DIRECT ACCESS TESTS ===");
-            int[] probes = new[] { 0, 1, 2, 10, 100, 1000, 1999, 2000, 5000, 10000, 25000, 50000, 75000, 100000, 250000, 500000, 1000000 };
-            foreach (int index in probes)
-                ProbeIndex(sb, index);
-
-            sb.AppendLine();
-            sb.AppendLine("=== PERSONREFERENCE FULL MANAGED METADATA (NO GETTERS INVOKED) ===");
-            DumpTypeMetadata(sb, typeof(PersonReference));
-            DumpNamedTypeMetadata(sb, "FM.UI.DatabaseRecordReference");
-            DumpNamedTypeMetadata(sb, "FM.UI.IPlayerReference");
-            DumpNamedTypeMetadata(sb, "FM.UI.PlayerAttributeReference");
-            DumpNamedTypeMetadata(sb, "FM.UI.AttributeNameAndValueReference");
-            DumpNamedTypeMetadata(sb, "FM.UI.AttributeValueReference");
+            sb.AppendLine("=== PROPERTYID MANAGED METADATA (NO GETTERS INVOKED) ===");
+            DumpTypeMetadata(sb, typeof(PropertyID));
+            DumpTypeMetadata(sb, typeof(ReferenceID));
 
             Save(sb);
         }
 
-        private static void ProbeIndex(StringBuilder sb, int index)
+        private static void DumpPropertyList(StringBuilder sb)
         {
             try
             {
-                var pr = new PersonReference(index);
-                if (pr == null)
+                var props = new Il2CppSystem.Collections.Generic.List<PropertyID>();
+                PersonReference.GetPropertiesInternal(props);
+                sb.AppendLine("GetPropertiesInternal list count=" + props.Count);
+
+                for (int i = 0; i < props.Count; i++)
                 {
-                    sb.AppendLine("INDEX " + index + " -> <null>");
-                    return;
+                    PropertyID pid = props[i];
+                    string text = "?";
+                    try { text = pid.ToString(); } catch (Exception ex) { text = "<ToString failed: " + ex.GetType().Name + ">"; }
+                    sb.AppendLine("PROPERTY[" + i + "] text='" + text + "'");
                 }
-
-                string type = "?";
-                string realIndex = "?";
-                string combined = "?";
-                string data1 = "?";
-                try { type = pr.Type.ToString(); } catch { }
-                try { realIndex = pr.m_index.ToString(); } catch { }
-                try { combined = pr.CombinedIndexAndType.ToString(); } catch { }
-                try { data1 = pr.Data1.ToString(); } catch { }
-
-                int propertySlot;
-                bool hasProperty = false;
-                string propError = "";
-                try { hasProperty = pr.TryGetProperty(PersonReference.UID, out propertySlot); }
-                catch (Exception ex) { propertySlot = 0; propError = ex.GetType().Name + ": " + ex.Message; }
-
-                int uid;
-                bool hasValue = false;
-                string valueError = "";
-                try { hasValue = pr.TryGetValue(PersonReference.UID, out uid); }
-                catch (Exception ex) { uid = 0; valueError = ex.GetType().Name + ": " + ex.Message; }
-
-                sb.AppendLine("INDEX " + index +
-                    " type=" + type +
-                    " m_index=" + realIndex +
-                    " combined=" + combined +
-                    " Data1=" + data1 +
-                    " TryGetProperty(UID)=" + hasProperty +
-                    " propertySlot=" + propertySlot +
-                    (propError.Length == 0 ? "" : " propertyError='" + propError + "'") +
-                    " TryGetValue(UID)=" + hasValue +
-                    " uid=" + uid +
-                    (valueError.Length == 0 ? "" : " valueError='" + valueError + "'"));
             }
             catch (Exception ex)
             {
-                sb.AppendLine("INDEX " + index + " ctor failed: " + ex.GetType().Name + " - " + ex.Message);
+                sb.AppendLine("GetPropertiesInternal failed: " + ex.GetType().Name + " - " + ex.Message);
             }
         }
 
-        private static void DumpReference(StringBuilder sb, PersonReference pr, string label)
+        private static uint GetReferenceUidFromIdentifier(string s)
         {
-            string type = "?";
-            string index = "?";
-            string combined = "?";
-            string data1 = "?";
-            string id = "?";
-            try { type = pr.Type.ToString(); } catch { }
-            try { index = pr.m_index.ToString(); } catch { }
-            try { combined = pr.CombinedIndexAndType.ToString(); } catch { }
-            try { data1 = pr.Data1.ToString(); } catch { }
-            try { id = pr.ID.ToString(); } catch (Exception ex) { id = "<" + ex.GetType().Name + ">"; }
-            sb.AppendLine(label + " ptr=0x" + pr.Pointer.ToString("X") + " type=" + type + " m_index=" + index + " combined=" + combined + " Data1=" + data1 + " ID=" + id);
+            if (string.IsNullOrEmpty(s)) return 0;
+            int colon = s.LastIndexOf(':');
+            if (colon < 0 || colon + 1 >= s.Length) return 0;
+            uint value;
+            return uint.TryParse(s.Substring(colon + 1), out value) ? value : 0;
         }
 
-        private static void DumpNamedTypeMetadata(StringBuilder sb, string fullName)
+        private static string Safe(Func<string> f)
         {
-            Type t = null;
-            foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                try
-                {
-                    t = a.GetType(fullName, false);
-                    if (t != null) break;
-                }
-                catch { }
-            }
-            if (t == null)
-            {
-                sb.AppendLine("TYPE NOT FOUND " + fullName);
-                return;
-            }
-            DumpTypeMetadata(sb, t);
+            try { return f(); }
+            catch (Exception ex) { return "<" + ex.GetType().Name + ": " + ex.Message + ">"; }
         }
 
         private static void DumpTypeMetadata(StringBuilder sb, Type t)
@@ -234,7 +196,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "personsemantics_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "propertyschema_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
