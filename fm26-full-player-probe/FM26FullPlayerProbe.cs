@@ -11,7 +11,7 @@ using SI.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.14.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.14.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -20,7 +20,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.14 BINDING SNAPSHOT - open a player profile, then press F8. No Harmony/UI traversal.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.14.1 BINDING SNAPSHOT - open a player profile, then press F8. No Harmony/UI traversal.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -91,7 +91,7 @@ namespace FM26FullPlayerProbe
             if (_personHandler == null) DiscoverHandler();
 
             var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.14 BINDING SNAPSHOT ===");
+            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.14.1 BINDING SNAPSHOT ===");
             sb.AppendLine("PersonReference.UID schema key=" + PersonReference.UID);
             sb.AppendLine("embeddedHandler=" + (_embedded == null ? "<null>" : ("0x" + _embedded.Pointer.ToString("X"))));
             sb.AppendLine("personHandler=" + (_personHandler == null ? "<null>" : ("0x" + _personHandler.Pointer.ToString("X"))));
@@ -203,7 +203,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "bindingsnapshot_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "bindingsnapshot_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
