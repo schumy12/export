@@ -1,25 +1,31 @@
 using System;
 using System.IO;
-using System.Reflection;
 using System.Text;
+using System.Collections.Generic;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using FM.UI;
+using SI.Core;
+using SI.Bindable;
+using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.27.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.28.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
         private static ProbeBehaviour _behaviour;
+
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.27 VALID BINDING KEY PATH - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.28 VALID REGISTERED NODES - press F8 after loading a save.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
+
         public override bool Unload()
         {
             if (_behaviour != null) UnityEngine.Object.Destroy(_behaviour);
@@ -29,158 +35,293 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
+        private const uint UniqueIdProperty = 1970170212u;
+        private const int ProbeCount = 32;
+
+        private InteropDataHandler _handler;
+        private BindingSubsystem _bindings;
+        private StringBuilder _sb;
+        private bool _running;
+        private float _finishAt;
+        private readonly List<TypedValue> _sources = new List<TypedValue>();
+        private readonly List<Bindings.Key> _keys = new List<Bindings.Key>();
+
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
 
         private void Update()
         {
             try
             {
-                if (Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
-                    RunProbe();
+                if (!_running && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
+                    StartProbe();
+
+                if (_running && Time.unscaledTime >= _finishAt)
+                    FinishProbe();
             }
             catch (Exception ex)
             {
                 Plugin.Log.LogError("[FM26FullProbe] Update error: " + ex);
-            }
-        }
-
-        private void RunProbe()
-        {
-            var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.27 VALID BINDING KEY PATH ===");
-            sb.AppendLine("0.26.1 proved InteropDataHandler opens backend channels, but arbitrary raw Keys are not registered in Bindings.");
-            sb.AppendLine("Goal: map the exact safe API needed to create a real Bindings node/key before OpenChannel.");
-            sb.AppendLine("Metadata reflection only; no generated FM/SI getters invoked through reflection.");
-            sb.AppendLine();
-
-            string[] targets = new[]
-            {
-                "SI.Bindable.Bindings",
-                "SI.Bindable.Bindings+Key",
-                "SI.Bindable.Bindings+NodeFlags",
-                "SI.Bindable.Bindings+GroupBuilder",
-                "SI.Bindable.Bindings+Group",
-                "SI.Bindable.Bindings+GroupInternal",
-                "SI.Bindable.Bindings+OpenRequest",
-                "Il2CppSystem.ReadOnlySpan`1[[System.Char, System.Private.CoreLib]]"
-            };
-
-            foreach (var name in targets)
-            {
-                DumpNamedTypeMetadata(sb, name);
-                sb.AppendLine();
-            }
-
-            var bindings = FindType("SI.Bindable.Bindings");
-            if (bindings != null)
-            {
-                sb.AppendLine("=== BINDINGS METHODS RELEVANT TO NODE CREATION / OPENING ===");
-                var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-                try
+                if (_running)
                 {
-                    foreach (var m in bindings.GetMethods(flags))
-                    {
-                        string n = m.Name ?? "";
-                        if (n.Contains("Create") || n.Contains("Bind") || n.Contains("Open") || n.Contains("Set") || n.Contains("Node") || n.Contains("Data"))
-                            sb.AppendLine("  METHOD " + (m.IsStatic ? "static " : "") + SafeMemberString(m));
-                    }
+                    try { _sb?.AppendLine("UPDATE/FATAL: " + ex); } catch { }
+                    FinishProbe();
                 }
-                catch (Exception ex) { sb.AppendLine("method filter failed: " + ex.GetType().Name + " - " + ex.Message); }
             }
-
-            sb.AppendLine();
-            sb.AppendLine("=== ENUM VALUES ===");
-            DumpEnumValues(sb, "SI.Bindable.Bindings+NodeFlags");
-            DumpEnumValues(sb, "SI.Bindable.Bindings+SetFlags");
-
-            Save(sb);
         }
 
-        private static void DumpEnumValues(StringBuilder sb, string fullName)
+        private void StartProbe()
         {
-            var t = FindType(fullName);
-            if (t == null) { sb.AppendLine(fullName + " <not found>"); return; }
-            sb.AppendLine(fullName + " IsEnum=" + t.IsEnum);
+            _sb = new StringBuilder();
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.28 VALID REGISTERED NODES ===");
+            _sb.AppendLine("Creates real temporary Bindings nodes before asking the live InteropDataHandler for UniqueId.");
+            _sb.AppendLine("No managed backend callback, no Harmony, no UI traversal, no m_bindingTree getter.");
+            _sb.AppendLine("Property UniqueId=" + UniqueIdProperty);
+            _sb.AppendLine();
+
+            _sources.Clear();
+            _keys.Clear();
+
+            _bindings = EmbeddedDataHandler.s_bindingSubsystem;
+            if (_bindings == null)
+            {
+                _sb.AppendLine("RESULT: BindingSubsystem NOT FOUND");
+                Save(_sb);
+                return;
+            }
+            _sb.AppendLine("BindingSubsystem ptr=0x" + _bindings.Pointer.ToString("X"));
+
+            _handler = FindLiveInteropHandler(_sb, _bindings);
+            if (_handler == null)
+            {
+                _sb.AppendLine("RESULT: live InteropDataHandler NOT FOUND");
+                Save(_sb);
+                return;
+            }
+
             try
             {
-                foreach (var n in Enum.GetNames(t))
-                    sb.AppendLine("  " + n + "=" + Convert.ToUInt64(Enum.Parse(t, n)));
+                _sb.AppendLine("handler ptr=0x" + _handler.Pointer.ToString("X"));
+                _sb.AppendLine("handler channels before=" + (_handler.m_channels == null ? -1 : _handler.m_channels.Count));
             }
-            catch (Exception ex) { sb.AppendLine("  enum read failed: " + ex.GetType().Name + " - " + ex.Message); }
-        }
-
-        private static void DumpNamedTypeMetadata(StringBuilder sb, string fullName)
-        {
-            var t = FindType(fullName);
-            if (t == null)
+            catch (Exception ex)
             {
-                // Generic runtime names can differ; fallback search by prefix/contains.
-                foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+                _sb.AppendLine("handler state read failed: " + ex.GetType().Name + " - " + ex.Message);
+            }
+
+            var property = new Bindings.Property("UniqueId", new PropertyID(UniqueIdProperty));
+            int opened = 0;
+            string runTag = DateTime.Now.ToString("HHmmssfff");
+
+            for (int index = 0; index < ProbeCount; index++)
+            {
+                try
                 {
-                    Type[] ts = null;
-                    try { ts = a.GetTypes(); } catch (ReflectionTypeLoadException e) { ts = e.Types; } catch { }
-                    if (ts == null) continue;
-                    foreach (var c in ts)
+                    var pr = new PersonReference(index);
+                    var tv = TypedValue.GetReferenceTypedValue();
+                    tv.SetValue(pr);
+                    _sources.Add(tv);
+
+                    string nodeName = "__fm26probe_uid_" + runTag + "_" + index;
+                    var key = CreateTemporaryNode(_bindings, nodeName);
+                    _keys.Add(key);
+
+                    bool valid = false;
+                    bool exists = false;
+                    try { valid = key.IsValid(); } catch { }
+                    try { exists = _bindings.Exists(ref key); } catch { }
+
+                    _handler.OpenChannel(tv, property, key);
+                    opened++;
+
+                    string channelName = "<none>";
+                    try
                     {
-                        if (c == null) continue;
-                        string fn = c.FullName ?? c.Name;
-                        if (fullName.StartsWith("Il2CppSystem.ReadOnlySpan") && fn.StartsWith("Il2CppSystem.ReadOnlySpan`1"))
-                        {
-                            t = c;
-                            break;
-                        }
+                        ulong rawKey = key;
+                        if (_handler.m_channels != null && _handler.m_channels.ContainsKey(rawKey))
+                            channelName = _handler.m_channels[rawKey] ?? "<null>";
                     }
-                    if (t != null) break;
+                    catch (Exception ex)
+                    {
+                        channelName = "<" + ex.GetType().Name + ">";
+                    }
+
+                    _sb.AppendLine("OPEN index=" + index + " key=" + SafeKey(key) + " valid=" + valid + " exists=" + exists + " data1=" + pr.Data1 + " channel='" + channelName + "'");
+                }
+                catch (Exception ex)
+                {
+                    _sb.AppendLine("OPEN FAIL index=" + index + " " + ex.GetType().Name + " - " + ex.Message);
                 }
             }
-            if (t == null) { sb.AppendLine("TYPE NOT FOUND " + fullName); return; }
-            DumpTypeMetadata(sb, t);
+
+            _sb.AppendLine("opened=" + opened + "/" + ProbeCount);
+            try { _sb.AppendLine("handler channels after open=" + (_handler.m_channels == null ? -1 : _handler.m_channels.Count)); } catch { }
+            _sb.AppendLine("Waiting 3 seconds for native InteropDataHandler callback...");
+
+            _running = true;
+            _finishAt = Time.unscaledTime + 3.0f;
         }
 
-        private static Type FindType(string fullName)
+        private void FinishProbe()
         {
-            foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+            if (!_running) return;
+            _running = false;
+
+            _sb.AppendLine();
+            _sb.AppendLine("=== VALUES AFTER WAIT ===");
+
+            int setCount = 0;
+            int readable = 0;
+
+            for (int index = 0; index < _keys.Count; index++)
             {
-                try { var t = a.GetType(fullName, false); if (t != null) return t; } catch { }
+                var key = _keys[index];
+                try
+                {
+                    bool exists = _bindings.Exists(ref key);
+                    bool isSet = _bindings.IsDataSet(key);
+                    if (isSet) setCount++;
+
+                    if (!exists || !isSet)
+                    {
+                        _sb.AppendLine("VALUE index=" + index + " key=" + SafeKey(key) + " exists=" + exists + " isDataSet=" + isSet);
+                        continue;
+                    }
+
+                    var tv = _bindings.Get(ref key);
+                    if (tv == null)
+                    {
+                        _sb.AppendLine("VALUE index=" + index + " key=" + SafeKey(key) + " exists=true isDataSet=true <null>");
+                        continue;
+                    }
+
+                    readable++;
+                    _sb.AppendLine("VALUE index=" + index + " key=" + SafeKey(key) + " exists=true isDataSet=true type=" + SafeType(tv) + " text='" + SafeText(tv) + "'");
+                }
+                catch (Exception ex)
+                {
+                    _sb.AppendLine("VALUE FAIL index=" + index + " key=" + SafeKey(key) + " " + ex.GetType().Name + " - " + ex.Message);
+                }
+            }
+
+            _sb.AppendLine("dataSetValues=" + setCount + "/" + _keys.Count);
+            _sb.AppendLine("readableValues=" + readable + "/" + _keys.Count);
+            try { _sb.AppendLine("handler channels before close=" + (_handler.m_channels == null ? -1 : _handler.m_channels.Count)); } catch { }
+
+            _sb.AppendLine();
+            _sb.AppendLine("=== CLEANUP ===");
+            for (int index = 0; index < _keys.Count; index++)
+            {
+                var key = _keys[index];
+                try { _handler.CloseChannel(key); }
+                catch (Exception ex) { _sb.AppendLine("CLOSE FAIL index=" + index + " " + ex.GetType().Name + " - " + ex.Message); }
+
+                try { _bindings.Remove(ref key); }
+                catch (Exception ex) { _sb.AppendLine("REMOVE FAIL index=" + index + " " + ex.GetType().Name + " - " + ex.Message); }
+            }
+
+            try { _sb.AppendLine("handler channels after cleanup=" + (_handler.m_channels == null ? -1 : _handler.m_channels.Count)); } catch { }
+
+            Save(_sb);
+            _sources.Clear();
+            _keys.Clear();
+            _handler = null;
+            _bindings = null;
+        }
+
+        private static unsafe Bindings.Key CreateTemporaryNode(BindingSubsystem bindings, string name)
+        {
+            fixed (char* p = name)
+            {
+                var span = new Il2CppSystem.ReadOnlySpan<char>((void*)p, name.Length);
+                return bindings.Create(ref span, Bindings.NodeFlags.Temporary);
+            }
+        }
+
+        private static InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
+        {
+            try
+            {
+                var registry = bindings.m_handlers;
+                if (registry == null)
+                {
+                    sb.AppendLine("bindings.m_handlers=<null>");
+                    return null;
+                }
+
+                sb.AppendLine("handler registry count=" + registry.Count);
+                foreach (var pair in registry)
+                {
+                    string keyName = "";
+                    try { keyName = pair.Key == null ? "<null>" : pair.Key.FullName; }
+                    catch { keyName = "<type-name-failed>"; }
+
+                    if (keyName == null || !keyName.Contains("InteropReference")) continue;
+                    sb.AppendLine("candidate registry key='" + keyName + "'");
+
+                    var list = pair.Value;
+                    if (list == null) continue;
+                    sb.AppendLine("  handler list count=" + list.Count);
+
+                    for (int i = 0; i < list.Count; i++)
+                    {
+                        var baseHandler = list[i];
+                        if (baseHandler == null) continue;
+
+                        try
+                        {
+                            var concrete = new InteropDataHandler(baseHandler.Pointer);
+                            if (concrete.m_interop != null)
+                            {
+                                sb.AppendLine("  InteropDataHandler confirmed ptr=0x" + concrete.Pointer.ToString("X") + " interop=0x" + concrete.m_interop.Pointer.ToString("X"));
+                                return concrete;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            sb.AppendLine("  wrap failed: " + ex.GetType().Name + " - " + ex.Message);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine("FindLiveInteropHandler failed: " + ex.GetType().Name + " - " + ex.Message);
             }
             return null;
         }
 
-        private static void DumpTypeMetadata(StringBuilder sb, Type t)
+        private static string SafeKey(Bindings.Key key)
         {
-            sb.AppendLine("TYPE " + (t.FullName ?? t.Name));
-            sb.AppendLine("  Assembly=" + (t.Assembly == null ? "?" : t.Assembly.GetName().Name));
-            sb.AppendLine("  BaseType=" + SafeTypeName(t.BaseType));
-            var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-            try { foreach (var p in t.GetProperties(flags)) sb.AppendLine("  PROP " + (IsStatic(p) ? "static " : "") + p.Name + " : " + SafeTypeName(p.PropertyType)); } catch { }
-            try { foreach (var f in t.GetFields(flags)) sb.AppendLine("  FIELD " + (f.IsStatic ? "static " : "") + f.Name + " : " + SafeTypeName(f.FieldType)); } catch { }
-            try { foreach (var c in t.GetConstructors(flags)) sb.AppendLine("  CTOR " + SafeMemberString(c)); } catch { }
-            try { foreach (var m in t.GetMethods(flags)) sb.AppendLine("  METHOD " + (m.IsStatic ? "static " : "") + SafeMemberString(m)); } catch { }
+            try { return key.ToString() ?? "<null>"; }
+            catch (Exception ex) { return "<" + ex.GetType().Name + ">"; }
         }
 
-        private static bool IsStatic(PropertyInfo p)
+        private static string SafeType(TypedValue tv)
         {
-            try { var g = p.GetGetMethod(true); if (g != null) return g.IsStatic; var s = p.GetSetMethod(true); return s != null && s.IsStatic; } catch { return false; }
+            try { return tv.DataType == null ? "<null>" : tv.DataType.FullName; }
+            catch (Exception ex) { return "<" + ex.GetType().Name + ">"; }
         }
-        private static string SafeTypeName(Type t)
+
+        private static string SafeText(TypedValue tv)
         {
-            try { return t == null ? "<null>" : (t.FullName ?? t.Name); } catch { return "?"; }
+            try { return tv.AsString() ?? ""; }
+            catch (Exception ex) { return "<" + ex.GetType().Name + ": " + ex.Message + ">"; }
         }
-        private static string SafeMemberString(MethodBase m)
-        {
-            try { return m == null ? "?" : m.ToString(); } catch { return m == null ? "?" : m.Name; }
-        }
+
         private static void Save(StringBuilder sb)
         {
             try
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "bindingkeypath_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "validnode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
-            catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex); }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex);
+            }
         }
     }
 }
