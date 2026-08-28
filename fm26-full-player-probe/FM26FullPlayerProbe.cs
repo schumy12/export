@@ -3,194 +3,29 @@ using System.IO;
 using System.Text;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
-using HarmonyLib;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UIElements;
-using FM.UI;
-using SI.Bindable;
-using SI.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.8.3")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.9.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
         private static ProbeBehaviour _behaviour;
-        internal static Harmony Harmony;
-        internal static bool HookInstalled;
 
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.8.3 - F7 installs PERSON-ONLY click hook");
-            Harmony = new Harmony("com.schumy12.fm26.fullplayerprobe.harmony");
-            HookInstalled = false;
+            Log.LogInfo("[FM26FullProbe] Loaded v0.9 SAFE - F7 records selected row; click player normally; F8 probes opened profile");
             _behaviour = AddComponent<ProbeBehaviour>();
-        }
-
-        internal static bool InstallClickHook()
-        {
-            if (HookInstalled) return true;
-            try
-            {
-                Harmony.PatchAll(typeof(PersonClickPatch));
-                HookInstalled = true;
-                Log.LogInfo("[FM26FullProbe] Temporary PERSON-ONLY click hook installed.");
-                return true;
-            }
-            catch (Exception ex)
-            {
-                Log.LogError("[FM26FullProbe] Could not install person click hook: " + ex);
-                return false;
-            }
-        }
-
-        internal static void RemoveClickHook()
-        {
-            if (!HookInstalled) return;
-            try { Harmony.UnpatchSelf(); }
-            catch (Exception ex) { Log.LogError("[FM26FullProbe] Could not remove click hook: " + ex); }
-            finally { HookInstalled = false; }
         }
 
         public override bool Unload()
         {
-            RemoveClickHook();
             if (_behaviour != null) UnityEngine.Object.Destroy(_behaviour);
             return base.Unload();
-        }
-    }
-
-    internal static class CaptureState
-    {
-        internal static bool Armed;
-        internal static int SelectedRow = -1;
-
-        internal static void Capture(EmbeddedDataClickedEvent evt)
-        {
-            var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.8.3 PERSON CLICK CAPTURE ===");
-            Line(sb, "Selected row when armed: " + SelectedRow);
-
-            if (evt == null)
-            {
-                Line(sb, "ERROR: EmbeddedDataClickedEvent is null");
-                Save(sb);
-                return;
-            }
-
-            try { Line(sb, "ViewKey: " + evt.ViewKey.ToString()); }
-            catch (Exception ex) { Line(sb, "ViewKey read failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            Record record = null;
-            try { record = evt.Record; }
-            catch (Exception ex) { Line(sb, "Record getter failed: " + ex.GetType().Name + " - " + ex.Message); }
-
-            if (record == null)
-            {
-                Line(sb, "ERROR: event Record is null");
-                Save(sb);
-                return;
-            }
-
-            int count = -1;
-            try { count = record.Count; } catch { }
-            Line(sb, "Record.Count=" + count);
-
-            try
-            {
-                var en = record.GetEnumerator();
-                int i = 0;
-                while (en.MoveNext())
-                {
-                    var kv = en.Current;
-                    uint key = kv.Key;
-                    TypedValue tv = kv.Value;
-                    Line(sb, "\nENTRY[" + i + "] key=" + key);
-                    DumpTypedValue(tv, sb, "  ");
-                    i++;
-                    if (i >= 200) { Line(sb, "Stopped at 200 entries."); break; }
-                }
-            }
-            catch (Exception ex)
-            {
-                Line(sb, "Record enumeration failed: " + ex.GetType().FullName + " - " + ex.Message);
-            }
-
-            Save(sb);
-        }
-
-        private static void DumpTypedValue(TypedValue tv, StringBuilder sb, string pad)
-        {
-            if (tv == null) { Line(sb, pad + "TypedValue=<null>"); return; }
-
-            Line(sb, pad + "wrapperType=" + SafeManagedType(tv));
-            try { Line(sb, pad + "IsNull=" + tv.IsNull); } catch (Exception ex) { Line(sb, pad + "IsNull=<" + ex.GetType().Name + ">"); }
-            try { Line(sb, pad + "DataType=" + (tv.DataType == null ? "<null>" : tv.DataType.FullName)); } catch (Exception ex) { Line(sb, pad + "DataType=<" + ex.GetType().Name + ">"); }
-            try { Line(sb, pad + "AsString=" + SafeText(tv.AsString())); } catch (Exception ex) { Line(sb, pad + "AsString=<" + ex.GetType().Name + ": " + ex.Message + ">"); }
-
-            Il2CppSystem.Object value = null;
-            try { value = tv.Get(); }
-            catch (Exception ex) { Line(sb, pad + "Get()=<" + ex.GetType().Name + ": " + ex.Message + ">"); }
-
-            if (value == null)
-            {
-                Line(sb, pad + "Value=<null>");
-                return;
-            }
-
-            Line(sb, pad + "ValueManagedType=" + SafeManagedType(value));
-            string il2cppTypeName = "";
-            try
-            {
-                var il2cppType = value.GetIl2CppType();
-                il2cppTypeName = il2cppType == null ? "" : (il2cppType.FullName ?? "");
-                Line(sb, pad + "ValueIl2CppType=" + (il2cppTypeName.Length == 0 ? "<unknown>" : il2cppTypeName));
-            }
-            catch (Exception ex)
-            {
-                Line(sb, pad + "ValueIl2CppType=<" + ex.GetType().Name + ">");
-            }
-
-            if (string.Equals(il2cppTypeName, "FM.UI.PersonReference", StringComparison.Ordinal))
-            {
-                Line(sb, pad + "*** PERSON REFERENCE FOUND ***");
-                try { Line(sb, pad + "NativePointer=0x" + value.Pointer.ToString("X")); } catch { }
-            }
-        }
-
-        private static string SafeManagedType(object o)
-        {
-            try { return o == null ? "<null>" : (o.GetType().FullName ?? o.GetType().Name); }
-            catch { return "<unknown>"; }
-        }
-
-        private static string SafeText(string s)
-        {
-            if (s == null) return "<null>";
-            s = s.Replace("\r", "\\r").Replace("\n", "\\n");
-            return s.Length > 300 ? s.Substring(0, 300) + "..." : s;
-        }
-
-        internal static void Line(StringBuilder sb, string s)
-        {
-            sb.AppendLine(s);
-            try { Plugin.Log.LogInfo("[FM26FullProbe] " + s); } catch { }
-        }
-
-        private static void Save(StringBuilder sb)
-        {
-            try
-            {
-                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
-                Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "clickcapture_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
-                File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
-                Plugin.Log.LogInfo("[FM26FullProbe] Saved click capture: " + file);
-            }
-            catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex); }
         }
     }
 
@@ -198,22 +33,25 @@ namespace FM26FullPlayerProbe
     {
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
 
+        private int _selectedRow = -1;
+
         private void Update()
         {
             try
             {
-                if (Keyboard.current != null && Keyboard.current.f7Key.wasPressedThisFrame)
-                    ArmCapture();
+                if (Keyboard.current == null) return;
+                if (Keyboard.current.f7Key.wasPressedThisFrame) RecordSelectedRow();
+                if (Keyboard.current.f8Key.wasPressedThisFrame) ProbeCurrentScreen();
             }
-            catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] " + ex); }
+            catch (Exception ex)
+            {
+                Plugin.Log.LogError("[FM26FullProbe] " + ex);
+            }
         }
 
-        private void ArmCapture()
+        private void RecordSelectedRow()
         {
-            CaptureState.Armed = false;
-            CaptureState.SelectedRow = -1;
-            Plugin.RemoveClickHook();
-
+            _selectedRow = -1;
             var root = MainRoot();
             var table = root == null ? null : (Find(root, "playertable") ?? Find(root, "client-object-viewer-table"));
             var view = table == null ? null : Find(table, "View");
@@ -223,8 +61,8 @@ namespace FM26FullPlayerProbe
                 return;
             }
 
-            int count = SafeChildCount(view);
             int selectedCount = 0;
+            int count = SafeChildCount(view);
             for (int i = 0; i < count; i++)
             {
                 VisualElement row = null;
@@ -235,26 +73,84 @@ namespace FM26FullPlayerProbe
                 if (selected)
                 {
                     selectedCount++;
-                    CaptureState.SelectedRow = i;
+                    _selectedRow = i;
                 }
             }
 
             if (selectedCount != 1)
             {
-                Plugin.Log.LogError("[FM26FullProbe] F7: select exactly ONE player first. Selected rows=" + selectedCount);
-                CaptureState.SelectedRow = -1;
+                _selectedRow = -1;
+                Plugin.Log.LogError("[FM26FullProbe] F7: select exactly ONE player. Selected rows=" + selectedCount);
                 return;
             }
 
-            if (!Plugin.InstallClickHook())
+            Plugin.Log.LogInfo("[FM26FullProbe] F7 OK. Selected row=" + _selectedRow + ". Now click the player's name normally, wait for profile to open, then press F8.");
+        }
+
+        private void ProbeCurrentScreen()
+        {
+            var sb = new StringBuilder();
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.9 PROFILE SCREEN ===");
+            Line(sb, "Selected row previously recorded: " + _selectedRow);
+
+            var root = MainRoot();
+            if (root == null)
             {
-                Plugin.Log.LogError("[FM26FullProbe] F7: capture not armed because person hook install failed.");
-                CaptureState.SelectedRow = -1;
+                Line(sb, "ERROR: PanelManager-container not found");
+                Save(sb);
                 return;
             }
 
-            CaptureState.Armed = true;
-            Plugin.Log.LogInfo("[FM26FullProbe] CAPTURE ARMED for selected row " + CaptureState.SelectedRow + ". Now CLICK THE PLAYER NAME once.");
+            int interesting = 0;
+            Scan(root, sb, "root", 0, ref interesting, 800);
+            Line(sb, "Interesting elements logged: " + interesting);
+            Save(sb);
+        }
+
+        private static void Scan(VisualElement el, StringBuilder sb, string path, int depth, ref int interesting, int max)
+        {
+            if (el == null || interesting >= max || depth > 18) return;
+
+            string name = SafeName(el);
+            string type = SafeType(el);
+            string dsType = "";
+            string dsPath = "";
+            object ds = null;
+            object ud = null;
+            int bc = 0;
+
+            try { dsType = el.dataSourceTypeString ?? ""; } catch { }
+            try { dsPath = el.dataSourcePathString ?? ""; } catch { }
+            try { ds = el.dataSource; } catch { }
+            try { ud = el.userData; } catch { }
+            try { if (el.bindings != null) bc = el.bindings.Count; } catch { }
+
+            bool nameHit = ContainsAny(name, "player", "person", "profile", "uid", "id", "data", "reference");
+            bool typeHit = ContainsAny(type, "player", "person", "profile", "reference");
+            bool hasData = !string.IsNullOrEmpty(dsType) || !string.IsNullOrEmpty(dsPath) || ds != null || ud != null || bc > 0;
+
+            if (nameHit || typeHit || hasData)
+            {
+                Line(sb, path + " name='" + name + "' type=" + type + " bindings=" + bc +
+                    " dsType='" + dsType + "' dsPath='" + dsPath + "' ds=" + SafeType(ds) + " userData=" + SafeType(ud));
+                interesting++;
+            }
+
+            int n = SafeChildCount(el);
+            for (int i = 0; i < n && interesting < max; i++)
+            {
+                VisualElement child = null;
+                try { child = el.ElementAt(i); } catch { }
+                if (child != null) Scan(child, sb, path + "/" + i, depth + 1, ref interesting, max);
+            }
+        }
+
+        private static bool ContainsAny(string s, params string[] needles)
+        {
+            if (string.IsNullOrEmpty(s)) return false;
+            foreach (var n in needles)
+                if (s.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0) return true;
+            return false;
         }
 
         private VisualElement MainRoot()
@@ -265,7 +161,8 @@ namespace FM26FullPlayerProbe
                 foreach (var doc in docs)
                 {
                     if (doc == null) continue;
-                    VisualElement r = null; try { r = doc.rootVisualElement; } catch { }
+                    VisualElement r = null;
+                    try { r = doc.rootVisualElement; } catch { }
                     if (r != null && SafeName(r) == "PanelManager-container") return r;
                 }
             }
@@ -280,37 +177,41 @@ namespace FM26FullPlayerProbe
             int n = SafeChildCount(root);
             for (int i = 0; i < n; i++)
             {
-                VisualElement c = null; try { c = root.ElementAt(i); } catch { }
-                var x = Find(c, name); if (x != null) return x;
+                VisualElement c = null;
+                try { c = root.ElementAt(i); } catch { }
+                var x = Find(c, name);
+                if (x != null) return x;
             }
             return null;
         }
 
         private static string SafeName(VisualElement el) { try { return el?.name ?? ""; } catch { return ""; } }
         private static int SafeChildCount(VisualElement el) { try { return el?.childCount ?? 0; } catch { return 0; } }
-    }
-
-    [HarmonyPatch(typeof(EmbeddedDataHandler.PersonReferenceClickedHandler), "HandleClicked")]
-    internal static class PersonClickPatch
-    {
-        [HarmonyPrefix]
-        private static void Prefix(EmbeddedDataClickedEvent __0)
+        private static string SafeType(object o)
         {
-            if (!CaptureState.Armed) return;
-            CaptureState.Armed = false;
+            try { return o == null ? "<null>" : (o.GetType().FullName ?? o.GetType().Name); }
+            catch { return "<unknown>"; }
+        }
 
+        private static void Line(StringBuilder sb, string s)
+        {
+            sb.AppendLine(s);
+            try { Plugin.Log.LogInfo("[FM26FullProbe] " + s); } catch { }
+        }
+
+        private static void Save(StringBuilder sb)
+        {
             try
             {
-                Plugin.Log.LogInfo("[FM26FullProbe] PERSON click intercepted; capturing Record...");
-                CaptureState.Capture(__0);
+                string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
+                Directory.CreateDirectory(dir);
+                string file = Path.Combine(dir, "profileprobe_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
+                File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
+                Plugin.Log.LogInfo("[FM26FullProbe] Saved profile probe: " + file);
             }
             catch (Exception ex)
             {
-                Plugin.Log.LogError("[FM26FullProbe] Capture exception: " + ex);
-            }
-            finally
-            {
-                Plugin.RemoveClickHook();
+                Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex);
             }
         }
     }
