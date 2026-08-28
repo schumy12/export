@@ -13,7 +13,7 @@ using SI.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.8.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.8.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -23,7 +23,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.8 - F7 arms capture; then click selected player's name");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.8.1 - F7 arms capture; then click selected player's name");
             _harmony = new Harmony("com.schumy12.fm26.fullplayerprobe.harmony");
             _harmony.PatchAll(typeof(EmbeddedClickPatch));
             _behaviour = AddComponent<ProbeBehaviour>();
@@ -45,7 +45,7 @@ namespace FM26FullPlayerProbe
         internal static void Capture(EmbeddedDataClickedEvent evt)
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.8 CLICK CAPTURE ===");
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.8.1 CLICK CAPTURE ===");
             Line(sb, "Selected row when armed: " + SelectedRow);
 
             if (evt == null)
@@ -116,24 +116,25 @@ namespace FM26FullPlayerProbe
             }
 
             Line(sb, pad + "ValueManagedType=" + SafeManagedType(value));
-            try { Line(sb, pad + "ValueIl2CppType=" + (value.GetIl2CppType() == null ? "<null>" : value.GetIl2CppType().FullName)); } catch { }
-
+            string il2cppTypeName = "";
             try
             {
-                var person = value.TryCast<PersonReference>();
-                if (person != null)
-                {
-                    Line(sb, pad + "*** PERSON REFERENCE FOUND ***");
-                    try { Line(sb, pad + "UID=" + person.UID); } catch (Exception ex) { Line(sb, pad + "UID=<" + ex.GetType().Name + ">"); }
-                    try { Line(sb, pad + "Index=" + person.m_index); } catch { }
-                    try { Line(sb, pad + "Type=" + person.Type); } catch { }
-                    try { Line(sb, pad + "CombinedIndexAndType=" + person.CombinedIndexAndType); } catch { }
-                    try { Line(sb, pad + "Data1=" + person.Data1); } catch { }
-                }
+                var il2cppType = value.GetIl2CppType();
+                il2cppTypeName = il2cppType == null ? "" : (il2cppType.FullName ?? "");
+                Line(sb, pad + "ValueIl2CppType=" + (il2cppTypeName.Length == 0 ? "<unknown>" : il2cppTypeName));
             }
             catch (Exception ex)
             {
-                Line(sb, pad + "PersonReference cast failed: " + ex.GetType().Name + " - " + ex.Message);
+                Line(sb, pad + "ValueIl2CppType=<" + ex.GetType().Name + ">");
+            }
+
+            // Do not use TryCast<PersonReference> here: generated FM.UI.PersonReference
+            // is not seen by the compiler as an Il2CppObjectBase generic target. For this
+            // probe we only need to prove that the clicked record contains the reference.
+            if (string.Equals(il2cppTypeName, "FM.UI.PersonReference", StringComparison.Ordinal))
+            {
+                Line(sb, pad + "*** PERSON REFERENCE FOUND ***");
+                try { Line(sb, pad + "NativePointer=0x" + value.Pointer.ToString("X")); } catch { }
             }
         }
 
@@ -162,7 +163,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "clickcapture_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
+                string file = Path.Combine(dir, "clickcapture_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved click capture: " + file);
             }
