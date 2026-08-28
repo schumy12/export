@@ -11,7 +11,7 @@ using SI.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.12.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.12.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -20,7 +20,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.12 TARGETED - open player profile, press F8. No Harmony, no UI traversal.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.12.1 TARGETED - open player profile, press F8. No Harmony, no UI traversal.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -51,7 +51,7 @@ namespace FM26FullPlayerProbe
         private void ProbeRuntime()
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.12 TARGETED RUNTIME ===");
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.12.1 TARGETED RUNTIME ===");
             Line(sb, "No Harmony. No VisualElement traversal. Direct known IL2CPP wrappers only.");
             Line(sb, "PersonReference.UID schema key=" + PersonReference.UID);
 
@@ -177,7 +177,18 @@ namespace FM26FullPlayerProbe
                 try
                 {
                     var ds = bs.DataSet;
-                    Line(sb, "BindingSubsystem.DataSet count=" + (ds == null ? -1 : ds.Count));
+                    int count = -1;
+                    if (ds != null)
+                    {
+                        try
+                        {
+                            var e = ds.GetEnumerator();
+                            count = 0;
+                            while (e.MoveNext()) count++;
+                        }
+                        catch { count = -2; }
+                    }
+                    Line(sb, "BindingSubsystem.DataSet count=" + count);
                 }
                 catch (Exception ex)
                 {
