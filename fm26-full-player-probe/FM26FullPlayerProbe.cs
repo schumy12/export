@@ -13,7 +13,7 @@ using SI.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.8.2")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.8.3")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.8.2 SAFE - no click hook at startup; F7 arms and installs it temporarily");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.8.3 - F7 installs PERSON-ONLY click hook");
             Harmony = new Harmony("com.schumy12.fm26.fullplayerprobe.harmony");
             HookInstalled = false;
             _behaviour = AddComponent<ProbeBehaviour>();
@@ -35,14 +35,14 @@ namespace FM26FullPlayerProbe
             if (HookInstalled) return true;
             try
             {
-                Harmony.PatchAll(typeof(EmbeddedClickPatch));
+                Harmony.PatchAll(typeof(PersonClickPatch));
                 HookInstalled = true;
-                Log.LogInfo("[FM26FullProbe] Temporary click hook installed.");
+                Log.LogInfo("[FM26FullProbe] Temporary PERSON-ONLY click hook installed.");
                 return true;
             }
             catch (Exception ex)
             {
-                Log.LogError("[FM26FullProbe] Could not install temporary click hook: " + ex);
+                Log.LogError("[FM26FullProbe] Could not install person click hook: " + ex);
                 return false;
             }
         }
@@ -50,19 +50,9 @@ namespace FM26FullPlayerProbe
         internal static void RemoveClickHook()
         {
             if (!HookInstalled) return;
-            try
-            {
-                Harmony.UnpatchSelf();
-                Log.LogInfo("[FM26FullProbe] Temporary click hook removed.");
-            }
-            catch (Exception ex)
-            {
-                Log.LogError("[FM26FullProbe] Could not remove temporary click hook: " + ex);
-            }
-            finally
-            {
-                HookInstalled = false;
-            }
+            try { Harmony.UnpatchSelf(); }
+            catch (Exception ex) { Log.LogError("[FM26FullProbe] Could not remove click hook: " + ex); }
+            finally { HookInstalled = false; }
         }
 
         public override bool Unload()
@@ -81,7 +71,7 @@ namespace FM26FullPlayerProbe
         internal static void Capture(EmbeddedDataClickedEvent evt)
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.8.2 CLICK CAPTURE ===");
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.8.3 PERSON CLICK CAPTURE ===");
             Line(sb, "Selected row when armed: " + SelectedRow);
 
             if (evt == null)
@@ -258,7 +248,7 @@ namespace FM26FullPlayerProbe
 
             if (!Plugin.InstallClickHook())
             {
-                Plugin.Log.LogError("[FM26FullProbe] F7: capture not armed because temporary hook install failed.");
+                Plugin.Log.LogError("[FM26FullProbe] F7: capture not armed because person hook install failed.");
                 CaptureState.SelectedRow = -1;
                 return;
             }
@@ -300,25 +290,27 @@ namespace FM26FullPlayerProbe
         private static int SafeChildCount(VisualElement el) { try { return el?.childCount ?? 0; } catch { return 0; } }
     }
 
-    [HarmonyPatch(typeof(EmbeddedDataHandler), "OnClickedEvent")]
-    internal static class EmbeddedClickPatch
+    [HarmonyPatch(typeof(EmbeddedDataHandler.PersonReferenceClickedHandler), "HandleClicked")]
+    internal static class PersonClickPatch
     {
         [HarmonyPrefix]
         private static void Prefix(EmbeddedDataClickedEvent __0)
         {
             if (!CaptureState.Armed) return;
-
             CaptureState.Armed = false;
-            Plugin.RemoveClickHook();
 
             try
             {
-                Plugin.Log.LogInfo("[FM26FullProbe] EmbeddedData click intercepted; capturing Record...");
+                Plugin.Log.LogInfo("[FM26FullProbe] PERSON click intercepted; capturing Record...");
                 CaptureState.Capture(__0);
             }
             catch (Exception ex)
             {
                 Plugin.Log.LogError("[FM26FullProbe] Capture exception: " + ex);
+            }
+            finally
+            {
+                Plugin.RemoveClickHook();
             }
         }
     }
