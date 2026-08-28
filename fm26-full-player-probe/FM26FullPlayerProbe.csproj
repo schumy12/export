@@ -58,6 +58,10 @@
       <HintPath>$(FM26Path)\BepInEx\interop\SI.Bindable.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="SI.Bindable.Reference.Core">
+      <HintPath>$(FM26Path)\BepInEx\interop\SI.Bindable.Reference.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="SI.Interop">
       <HintPath>$(FM26Path)\BepInEx\interop\SI.Interop.dll</HintPath>
       <Private>false</Private>
