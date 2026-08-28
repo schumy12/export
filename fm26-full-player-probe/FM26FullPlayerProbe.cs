@@ -13,7 +13,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.26.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.26.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -22,7 +22,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.26 LIVE INTEROP HANDLER - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.26.1 LIVE INTEROP HANDLER - m_bindingTree getter avoided.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -40,6 +40,7 @@ namespace FM26FullPlayerProbe
         private const int ProbeCount = 32;
 
         private InteropDataHandler _handler;
+        private BindingSubsystem _bindings;
         private StringBuilder _sb;
         private bool _running;
         private float _finishAt;
@@ -71,14 +72,23 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.26 LIVE INTEROP HANDLER ===");
-            _sb.AppendLine("Uses the already-live FM.UI.InteropDataHandler and its native callback.");
-            _sb.AppendLine("No managed ReadOnlySpan delegate, no Harmony, no UI traversal.");
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.26.1 LIVE INTEROP HANDLER ===");
+            _sb.AppendLine("Uses live InteropDataHandler, but avoids its m_bindingTree getter because compile-time and runtime interop signatures differ.");
+            _sb.AppendLine("Reads results through the already-live EmbeddedDataHandler.s_bindingSubsystem instead.");
             _sb.AppendLine("Property UniqueId=" + UniqueIdProperty);
             _sb.AppendLine();
 
             _sources.Clear();
-            _handler = FindLiveInteropHandler(_sb);
+            _bindings = EmbeddedDataHandler.s_bindingSubsystem;
+            if (_bindings == null)
+            {
+                _sb.AppendLine("RESULT: BindingSubsystem NOT FOUND");
+                Save(_sb);
+                return;
+            }
+            _sb.AppendLine("BindingSubsystem ptr=0x" + _bindings.Pointer.ToString("X"));
+
+            _handler = FindLiveInteropHandler(_sb, _bindings);
             if (_handler == null)
             {
                 _sb.AppendLine("RESULT: live InteropDataHandler NOT FOUND");
@@ -90,7 +100,7 @@ namespace FM26FullPlayerProbe
             {
                 _sb.AppendLine("handler ptr=0x" + _handler.Pointer.ToString("X"));
                 _sb.AppendLine("handler channels before=" + (_handler.m_channels == null ? -1 : _handler.m_channels.Count));
-                _sb.AppendLine("bindingTree valid=" + _handler.m_bindingTree.IsValid());
+                _sb.AppendLine("NOTE: m_bindingTree intentionally not touched.");
             }
             catch (Exception ex)
             {
@@ -158,7 +168,7 @@ namespace FM26FullPlayerProbe
 
                 try
                 {
-                    var tv = _handler.m_bindingTree.Get(ref key);
+                    var tv = _bindings.Get(ref key);
                     if (tv == null)
                     {
                         _sb.AppendLine("VALUE index=" + index + " key=" + rawKey + " <null>");
@@ -199,20 +209,13 @@ namespace FM26FullPlayerProbe
             Save(_sb);
             _sources.Clear();
             _handler = null;
+            _bindings = null;
         }
 
-        private static InteropDataHandler FindLiveInteropHandler(StringBuilder sb)
+        private static InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
         {
             try
             {
-                var bindings = EmbeddedDataHandler.s_bindingSubsystem;
-                if (bindings == null)
-                {
-                    sb.AppendLine("BindingSubsystem=<null>");
-                    return null;
-                }
-
-                sb.AppendLine("BindingSubsystem ptr=0x" + bindings.Pointer.ToString("X"));
                 var registry = bindings.m_handlers;
                 if (registry == null)
                 {
