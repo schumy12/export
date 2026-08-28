@@ -13,25 +13,61 @@ using SI.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.8.1")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.8.2")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
         private static ProbeBehaviour _behaviour;
-        private Harmony _harmony;
+        internal static Harmony Harmony;
+        internal static bool HookInstalled;
 
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.8.1 - F7 arms capture; then click selected player's name");
-            _harmony = new Harmony("com.schumy12.fm26.fullplayerprobe.harmony");
-            _harmony.PatchAll(typeof(EmbeddedClickPatch));
+            Log.LogInfo("[FM26FullProbe] Loaded v0.8.2 SAFE - no click hook at startup; F7 arms and installs it temporarily");
+            Harmony = new Harmony("com.schumy12.fm26.fullplayerprobe.harmony");
+            HookInstalled = false;
             _behaviour = AddComponent<ProbeBehaviour>();
+        }
+
+        internal static bool InstallClickHook()
+        {
+            if (HookInstalled) return true;
+            try
+            {
+                Harmony.PatchAll(typeof(EmbeddedClickPatch));
+                HookInstalled = true;
+                Log.LogInfo("[FM26FullProbe] Temporary click hook installed.");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log.LogError("[FM26FullProbe] Could not install temporary click hook: " + ex);
+                return false;
+            }
+        }
+
+        internal static void RemoveClickHook()
+        {
+            if (!HookInstalled) return;
+            try
+            {
+                Harmony.UnpatchSelf();
+                Log.LogInfo("[FM26FullProbe] Temporary click hook removed.");
+            }
+            catch (Exception ex)
+            {
+                Log.LogError("[FM26FullProbe] Could not remove temporary click hook: " + ex);
+            }
+            finally
+            {
+                HookInstalled = false;
+            }
         }
 
         public override bool Unload()
         {
-            try { _harmony?.UnpatchSelf(); } catch { }
+            RemoveClickHook();
             if (_behaviour != null) UnityEngine.Object.Destroy(_behaviour);
             return base.Unload();
         }
@@ -45,7 +81,7 @@ namespace FM26FullPlayerProbe
         internal static void Capture(EmbeddedDataClickedEvent evt)
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.8.1 CLICK CAPTURE ===");
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.8.2 CLICK CAPTURE ===");
             Line(sb, "Selected row when armed: " + SelectedRow);
 
             if (evt == null)
@@ -128,9 +164,6 @@ namespace FM26FullPlayerProbe
                 Line(sb, pad + "ValueIl2CppType=<" + ex.GetType().Name + ">");
             }
 
-            // Do not use TryCast<PersonReference> here: generated FM.UI.PersonReference
-            // is not seen by the compiler as an Il2CppObjectBase generic target. For this
-            // probe we only need to prove that the clicked record contains the reference.
             if (string.Equals(il2cppTypeName, "FM.UI.PersonReference", StringComparison.Ordinal))
             {
                 Line(sb, pad + "*** PERSON REFERENCE FOUND ***");
@@ -189,6 +222,7 @@ namespace FM26FullPlayerProbe
         {
             CaptureState.Armed = false;
             CaptureState.SelectedRow = -1;
+            Plugin.RemoveClickHook();
 
             var root = MainRoot();
             var table = root == null ? null : (Find(root, "playertable") ?? Find(root, "client-object-viewer-table"));
@@ -218,6 +252,13 @@ namespace FM26FullPlayerProbe
             if (selectedCount != 1)
             {
                 Plugin.Log.LogError("[FM26FullProbe] F7: select exactly ONE player first. Selected rows=" + selectedCount);
+                CaptureState.SelectedRow = -1;
+                return;
+            }
+
+            if (!Plugin.InstallClickHook())
+            {
+                Plugin.Log.LogError("[FM26FullProbe] F7: capture not armed because temporary hook install failed.");
                 CaptureState.SelectedRow = -1;
                 return;
             }
@@ -266,7 +307,10 @@ namespace FM26FullPlayerProbe
         private static void Prefix(EmbeddedDataClickedEvent __0)
         {
             if (!CaptureState.Armed) return;
+
             CaptureState.Armed = false;
+            Plugin.RemoveClickHook();
+
             try
             {
                 Plugin.Log.LogInfo("[FM26FullProbe] EmbeddedData click intercepted; capturing Record...");
