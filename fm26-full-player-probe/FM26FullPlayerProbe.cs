@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Text;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
@@ -9,7 +10,7 @@ using UnityEngine.UIElements;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.9.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.9.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -18,7 +19,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.9 SAFE - F7 records selected row; click player normally; F8 probes opened profile");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.9.1 SAFE METADATA - F7 records row; click player; F8 scans names/types only");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -43,10 +44,7 @@ namespace FM26FullPlayerProbe
                 if (Keyboard.current.f7Key.wasPressedThisFrame) RecordSelectedRow();
                 if (Keyboard.current.f8Key.wasPressedThisFrame) ProbeCurrentScreen();
             }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogError("[FM26FullProbe] " + ex);
-            }
+            catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] " + ex); }
         }
 
         private void RecordSelectedRow()
@@ -70,11 +68,7 @@ namespace FM26FullPlayerProbe
                 if (row == null) continue;
                 bool selected = false;
                 try { selected = row.ClassListContains("virtualised-list__item--selected"); } catch { }
-                if (selected)
-                {
-                    selectedCount++;
-                    _selectedRow = i;
-                }
+                if (selected) { selectedCount++; _selectedRow = i; }
             }
 
             if (selectedCount != 1)
@@ -84,13 +78,13 @@ namespace FM26FullPlayerProbe
                 return;
             }
 
-            Plugin.Log.LogInfo("[FM26FullProbe] F7 OK. Selected row=" + _selectedRow + ". Now click the player's name normally, wait for profile to open, then press F8.");
+            Plugin.Log.LogInfo("[FM26FullProbe] F7 OK. Selected row=" + _selectedRow + ". Open that player's profile normally, then press F8.");
         }
 
         private void ProbeCurrentScreen()
         {
             var sb = new StringBuilder();
-            Line(sb, "=== FM26 FULL PLAYER PROBE 0.9 PROFILE SCREEN ===");
+            Line(sb, "=== FM26 FULL PLAYER PROBE 0.9.1 PROFILE METADATA ONLY ===");
             Line(sb, "Selected row previously recorded: " + _selectedRow);
 
             var root = MainRoot();
@@ -102,37 +96,34 @@ namespace FM26FullPlayerProbe
             }
 
             int interesting = 0;
-            Scan(root, sb, "root", 0, ref interesting, 800);
-            Line(sb, "Interesting elements logged: " + interesting);
+            ScanNamesOnly(root, sb, "root", 0, ref interesting, 1200);
+            Line(sb, "Interesting UI elements logged: " + interesting);
+
+            Line(sb, "\n=== FM/SI PROFILE-RELATED TYPE METADATA ===");
+            DumpTypeMatches(sb, new[] {
+                "PlayerProfile", "PersonProfile", "PlayerPanel", "PersonPanel",
+                "PlayerReport", "PlayerOverview", "PlayerDetails", "PlayerHeader",
+                "PersonReference", "PlayerReference", "PlayerID", "PersonID"
+            }, 250);
+
             Save(sb);
         }
 
-        private static void Scan(VisualElement el, StringBuilder sb, string path, int depth, ref int interesting, int max)
+        private static void ScanNamesOnly(VisualElement el, StringBuilder sb, string path, int depth, ref int interesting, int max)
         {
-            if (el == null || interesting >= max || depth > 18) return;
+            if (el == null || interesting >= max || depth > 20) return;
 
             string name = SafeName(el);
-            string type = SafeType(el);
-            string dsType = "";
-            string dsPath = "";
-            object ds = null;
-            object ud = null;
-            int bc = 0;
+            string type = SafeManagedType(el);
+            bool hit = ContainsAny(name,
+                "player", "person", "profile", "report", "overview", "header",
+                "details", "attribute", "ability", "potential", "uid", "id", "reference") ||
+                ContainsAny(type,
+                "player", "person", "profile", "report", "reference");
 
-            try { dsType = el.dataSourceTypeString ?? ""; } catch { }
-            try { dsPath = el.dataSourcePathString ?? ""; } catch { }
-            try { ds = el.dataSource; } catch { }
-            try { ud = el.userData; } catch { }
-            try { if (el.bindings != null) bc = el.bindings.Count; } catch { }
-
-            bool nameHit = ContainsAny(name, "player", "person", "profile", "uid", "id", "data", "reference");
-            bool typeHit = ContainsAny(type, "player", "person", "profile", "reference");
-            bool hasData = !string.IsNullOrEmpty(dsType) || !string.IsNullOrEmpty(dsPath) || ds != null || ud != null || bc > 0;
-
-            if (nameHit || typeHit || hasData)
+            if (hit)
             {
-                Line(sb, path + " name='" + name + "' type=" + type + " bindings=" + bc +
-                    " dsType='" + dsType + "' dsPath='" + dsPath + "' ds=" + SafeType(ds) + " userData=" + SafeType(ud));
+                Line(sb, path + " name='" + name + "' type=" + type + " children=" + SafeChildCount(el));
                 interesting++;
             }
 
@@ -141,8 +132,88 @@ namespace FM26FullPlayerProbe
             {
                 VisualElement child = null;
                 try { child = el.ElementAt(i); } catch { }
-                if (child != null) Scan(child, sb, path + "/" + i, depth + 1, ref interesting, max);
+                if (child != null) ScanNamesOnly(child, sb, path + "/" + i, depth + 1, ref interesting, max);
             }
+        }
+
+        private static void DumpTypeMatches(StringBuilder sb, string[] needles, int max)
+        {
+            int count = 0;
+            foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                string an = "";
+                try { an = a.GetName().Name ?? ""; } catch { continue; }
+                if (!(an.StartsWith("FM") || an.StartsWith("SI"))) continue;
+
+                Type[] types;
+                try { types = a.GetTypes(); }
+                catch (ReflectionTypeLoadException e) { types = e.Types; }
+                catch { continue; }
+                if (types == null) continue;
+
+                foreach (var t in types)
+                {
+                    if (t == null) continue;
+                    string fn = t.FullName ?? "";
+                    bool ok = false;
+                    foreach (var n in needles)
+                    {
+                        if (fn.IndexOf(n, StringComparison.OrdinalIgnoreCase) >= 0) { ok = true; break; }
+                    }
+                    if (!ok) continue;
+
+                    Line(sb, "TYPE " + an + ": " + fn);
+                    DumpTypeMetadata(t, sb, "  ");
+                    if (++count >= max) return;
+                }
+            }
+        }
+
+        private static void DumpTypeMetadata(Type t, StringBuilder sb, string pad)
+        {
+            var flags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+            try
+            {
+                foreach (var p in t.GetProperties(flags))
+                {
+                    string pn = p.Name ?? "";
+                    string pt = SafeTypeName(p.PropertyType);
+                    if (ContainsAny(pn, "player", "person", "uid", "id", "reference", "record", "data", "panel", "profile") ||
+                        ContainsAny(pt, "player", "person", "reference", "record"))
+                        Line(sb, pad + "PROP " + pn + " : " + pt);
+                }
+            }
+            catch { }
+
+            try
+            {
+                foreach (var f in t.GetFields(flags))
+                {
+                    string fn = f.Name ?? "";
+                    string ft = SafeTypeName(f.FieldType);
+                    if (ContainsAny(fn, "player", "person", "uid", "id", "reference", "record", "data", "panel", "profile") ||
+                        ContainsAny(ft, "player", "person", "reference", "record"))
+                        Line(sb, pad + "FIELD " + fn + " : " + ft);
+                }
+            }
+            catch { }
+
+            try
+            {
+                foreach (var m in t.GetMethods(flags))
+                {
+                    string mn = m.Name ?? "";
+                    if (ContainsAny(mn, "player", "person", "uid", "id", "reference", "record", "data", "panel", "profile", "open", "show"))
+                        Line(sb, pad + "METHOD " + SafeMemberString(m));
+                }
+            }
+            catch { }
+        }
+
+        private static string SafeMemberString(MethodBase m)
+        {
+            try { return m == null ? "?" : m.ToString(); }
+            catch { return m?.Name ?? "?"; }
         }
 
         private static bool ContainsAny(string s, params string[] needles)
@@ -187,10 +258,15 @@ namespace FM26FullPlayerProbe
 
         private static string SafeName(VisualElement el) { try { return el?.name ?? ""; } catch { return ""; } }
         private static int SafeChildCount(VisualElement el) { try { return el?.childCount ?? 0; } catch { return 0; } }
-        private static string SafeType(object o)
+        private static string SafeManagedType(object o)
         {
             try { return o == null ? "<null>" : (o.GetType().FullName ?? o.GetType().Name); }
             catch { return "<unknown>"; }
+        }
+        private static string SafeTypeName(Type t)
+        {
+            try { return t?.FullName ?? t?.Name ?? "?"; }
+            catch { return "?"; }
         }
 
         private static void Line(StringBuilder sb, string s)
@@ -209,10 +285,7 @@ namespace FM26FullPlayerProbe
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved profile probe: " + file);
             }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex);
-            }
+            catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex); }
         }
     }
 }
