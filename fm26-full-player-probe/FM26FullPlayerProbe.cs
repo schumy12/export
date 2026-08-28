@@ -9,7 +9,7 @@ using FM.UI;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.15.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.15.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -18,7 +18,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.15 DIRECT PERSON INDEX PROBE - press F8 anywhere after loading a save. No Harmony/UI traversal.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.15.1 DIRECT PERSON INDEX PROBE - press F8 anywhere after loading a save. No Harmony/UI traversal.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -49,7 +49,7 @@ namespace FM26FullPlayerProbe
         private void RunIndexProbe()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.15 DIRECT PERSON INDEX PROBE ===");
+            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.15.1 DIRECT PERSON INDEX PROBE ===");
             sb.AppendLine("Goal: test whether PersonReference(int index) + TryGetValue(UID) can enumerate database persons directly.");
             sb.AppendLine("PersonReference.UID schema key=" + PersonReference.UID);
             sb.AppendLine("Range: index 0..1999, stop after 100 successful UID reads.");
@@ -84,8 +84,8 @@ namespace FM26FullPlayerProbe
 
                 try
                 {
-                    int uid = 0;
-                    bool ok = pr.TryGetValue(PersonReference.UID, ref uid);
+                    int uid;
+                    bool ok = pr.TryGetValue(PersonReference.UID, out uid);
                     if (ok)
                     {
                         hits++;
