@@ -16,7 +16,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.46.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.47.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -25,7 +25,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.46 FOOT + POSITION EDGE RESOLVER - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.47 FOOT DYNAMIC METADATA - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -38,20 +38,8 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
-        private struct Target
-        {
-            public string Name;
-            public uint Id;
-            public Target(string name, uint id) { Name = name; Id = id; }
-        }
-
-        private static readonly Target[] Targets = new Target[]
-        {
-            new Target("Footedness", 1244885353u),
-            new Target("PlayerFootednessSpeakTo", 1111782216u),
-            new Target("CompetentPositionsListLong", 1483174254u)
-        };
-
+        private const uint FootednessId = 1244885353u;
+        private const uint CompetentPositionsId = 1483174254u;
         private const float WaitSeconds = 0.60f;
 
         private BindingSubsystem _bindings;
@@ -63,7 +51,7 @@ namespace FM26FullPlayerProbe
         private Bindings.Data _data;
         private TypedValue _source;
         private StringBuilder _log;
-        private int _targetIndex;
+        private int _stage;
         private bool _waiting;
         private bool _channelOpen;
         private bool _nativeNodeAdded;
@@ -76,7 +64,7 @@ namespace FM26FullPlayerProbe
             try
             {
                 if (!_waiting && _log == null && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame) StartProbe();
-                if (_waiting && Time.unscaledTime >= _checkAt) FinishTarget();
+                if (_waiting && Time.unscaledTime >= _checkAt) FinishStage();
             }
             catch (Exception ex)
             {
@@ -89,8 +77,8 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.46 FOOT + POSITION EDGE RESOLVER ===");
-            _log.AppendLine("Tests raw Footedness, SpeakToReference metadata, and DynamicReference unwrapping inside CompetentPositionsListLong.");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.47 FOOT DYNAMIC METADATA ===");
+            _log.AppendLine("0.46 proved Footedness is DynamicReference but GetPropertyValue asks for missing key 1886680684. This probe dumps DynamicReference metadata only, without invoking arbitrary reflected getters.");
             _log.AppendLine();
 
             var showPerson = FindSelectedShowPerson(_log);
@@ -125,12 +113,12 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_foot_position_edge");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_foot_dynamic_metadata");
                 _log.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _log.AppendLine("RESULT: node missing"); SaveAndReset(); return; }
                 _node = _bindings.m_nodes[_key.m_key];
-                _targetIndex = 0;
-                StartTarget();
+                _stage = 0;
+                StartStage();
             }
             catch (Exception ex)
             {
@@ -139,18 +127,19 @@ namespace FM26FullPlayerProbe
             }
         }
 
-        private void StartTarget()
+        private void StartStage()
         {
-            if (_targetIndex >= Targets.Length)
+            if (_stage >= 2)
             {
                 _log.AppendLine();
-                _log.AppendLine("RESULT: edge resolver completed");
+                _log.AppendLine("RESULT: dynamic metadata probe completed");
                 SaveAndReset();
                 return;
             }
 
-            var t = Targets[_targetIndex];
-            var propId = new PropertyID(t.Id);
+            string name = _stage == 0 ? "Footedness" : "CompetentPositionsListLong";
+            uint id = _stage == 0 ? FootednessId : CompetentPositionsId;
+            var propId = new PropertyID(id);
             _node.m_propID = propId;
             _data = _bindings.GetNewData();
             if (_data == null) throw new Exception("GetNewData returned null");
@@ -166,22 +155,20 @@ namespace FM26FullPlayerProbe
             _data.handler = _handlerInterface;
             _data.opener = _key;
 
-            var property = new Bindings.Property(t.Name, propId);
+            var property = new Bindings.Property(name, propId);
             var contexts = new Il2CppSystem.Collections.Generic.List<string>();
-            bool accepts = PersonReference.AcceptsPropertyInternal(t.Id);
             bool canHandle = _handler.CanHandle(_source, property, contexts);
             _log.AppendLine();
-            _log.AppendLine("TARGET [" + _targetIndex + "/" + Targets.Length + "] " + t.Name + " accepts=" + accepts + " canHandle=" + canHandle);
+            _log.AppendLine("STAGE " + _stage + " " + name + " canHandle=" + canHandle);
             _handler.OpenChannel(_source, property, _key);
             _channelOpen = true;
             _waiting = true;
             _checkAt = Time.unscaledTime + WaitSeconds;
         }
 
-        private void FinishTarget()
+        private void FinishStage()
         {
             _waiting = false;
-            var t = Targets[_targetIndex];
             TypedValue tv = null;
             bool isSet = false;
             try
@@ -194,51 +181,64 @@ namespace FM26FullPlayerProbe
 
             if (isSet && tv != null)
             {
-                if (t.Name == "Footedness") TryResolveDynamic("FOOT", tv);
-                else if (t.Name == "PlayerFootednessSpeakTo") DumpSpeakTo(tv);
-                else if (t.Name == "CompetentPositionsListLong") ReadPositionList(tv);
+                if (_stage == 0) InspectFootedness(tv);
+                else InspectCompetentPositions(tv);
             }
 
             CleanupGraph();
-            _targetIndex++;
-            try { StartTarget(); }
+            _stage++;
+            try { StartStage(); }
             catch (Exception ex) { _log.AppendLine("NEXT FAIL: " + ex.GetType().Name + " - " + ex.Message); SaveAndReset(); }
         }
 
-        private void TryResolveDynamic(string label, TypedValue tv)
+        private void InspectFootedness(TypedValue tv)
         {
+            if (SafeType(tv) != "SI.Bindable.DynamicReference")
+            {
+                _log.AppendLine("FOOT not DynamicReference");
+                return;
+            }
+
             try
             {
-                if (SafeType(tv) != "SI.Bindable.DynamicReference")
-                {
-                    _log.AppendLine(label + " not DynamicReference; text='" + CleanUiString(SafeText(tv)) + "'");
-                    return;
-                }
                 var dyn = VisualFunctionLibrary.GetDynamicReference(tv);
-                _log.AppendLine(label + " GetDynamicReference OK ptr=0x" + dyn.Pointer.ToString("X"));
-                var inner = VisualFunctionLibrary.GetPropertyValue(dyn);
-                _log.AppendLine(label + " INNER type=" + SafeType(inner) + " value='" + CleanUiString(SafeText(inner)) + "'");
+                _log.AppendLine("FOOT dyn ptr=0x" + dyn.Pointer.ToString("X"));
+                DumpTypeMetadata(typeof(DynamicReference), "DynamicReference");
             }
-            catch (Exception ex)
-            {
-                _log.AppendLine(label + " DYNAMIC RESOLVE FAIL: " + ex.GetType().Name + " - " + ex.Message);
-            }
+            catch (Exception ex) { _log.AppendLine("FOOT GetDynamicReference FAIL: " + ex.GetType().Name + " - " + ex.Message); }
         }
 
-        private void DumpSpeakTo(TypedValue tv)
+        private void InspectCompetentPositions(TypedValue tv)
         {
-            _log.AppendLine("SPEAKTO type=" + SafeType(tv));
             try
             {
-                var raw = tv.Get();
-                if (raw != null) _log.AppendLine("SPEAKTO rawType=" + raw.GetType().FullName + " ptr=0x" + raw.Pointer.ToString("X"));
+                var list = tv.Get<Il2CppSystem.Collections.Generic.List<TypedValue>>();
+                if (list == null) { _log.AppendLine("POSITION LIST null"); return; }
+                _log.AppendLine("POSITION LIST count=" + list.Count);
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var item = list[i];
+                    _log.AppendLine("POSITION ITEM[" + i + "] type=" + SafeType(item) + " raw='" + CleanUiString(SafeText(item)) + "'");
+                    if (SafeType(item) == "SI.Bindable.DynamicReference")
+                    {
+                        try
+                        {
+                            var dyn = VisualFunctionLibrary.GetDynamicReference(item);
+                            var inner = VisualFunctionLibrary.GetPropertyValue(dyn);
+                            _log.AppendLine("POSITION ITEM[" + i + "] valueType=" + SafeType(inner) + " value='" + CleanUiString(SafeText(inner)) + "'");
+                        }
+                        catch (Exception ex) { _log.AppendLine("POSITION ITEM[" + i + "] FAIL: " + ex.GetType().Name + " - " + ex.Message); }
+                    }
+                }
             }
-            catch (Exception ex) { _log.AppendLine("SPEAKTO raw FAIL: " + ex.GetType().Name + " - " + ex.Message); }
+            catch (Exception ex) { _log.AppendLine("POSITION LIST READ FAIL: " + ex.GetType().Name + " - " + ex.Message); }
+        }
 
+        private void DumpTypeMetadata(Type type, string label)
+        {
             try
             {
-                var type = typeof(SpeakToReference);
-                _log.AppendLine("--- SpeakToReference metadata ---");
+                _log.AppendLine("--- " + label + " metadata ---");
                 foreach (var p in type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static))
                     _log.AppendLine("PROP " + (p.GetMethod != null && p.GetMethod.IsStatic ? "static " : "") + p.PropertyType.FullName + " " + p.Name);
                 foreach (var f in type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static))
@@ -251,44 +251,7 @@ namespace FM26FullPlayerProbe
                     _log.AppendLine("METHOD " + (m.IsStatic ? "static " : "") + m.ReturnType.FullName + " " + m.Name + "(" + sb + ")");
                 }
             }
-            catch (Exception ex) { _log.AppendLine("SPEAKTO metadata FAIL: " + ex.GetType().Name + " - " + ex.Message); }
-        }
-
-        private void ReadPositionList(TypedValue tv)
-        {
-            try
-            {
-                var list = tv.Get<Il2CppSystem.Collections.Generic.List<TypedValue>>();
-                if (list == null) { _log.AppendLine("LIST null"); return; }
-                _log.AppendLine("LIST count=" + list.Count);
-                var result = new StringBuilder();
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var item = list[i];
-                    string type = SafeType(item);
-                    string raw = CleanUiString(SafeText(item));
-                    _log.AppendLine("ITEM[" + i + "] type=" + type + " raw='" + raw + "'");
-                    string value = raw;
-                    if (type == "SI.Bindable.DynamicReference")
-                    {
-                        try
-                        {
-                            var dyn = VisualFunctionLibrary.GetDynamicReference(item);
-                            var inner = VisualFunctionLibrary.GetPropertyValue(dyn);
-                            value = CleanUiString(SafeText(inner));
-                            _log.AppendLine("ITEM[" + i + "] UNWRAPPED type=" + SafeType(inner) + " value='" + value + "'");
-                        }
-                        catch (Exception ex) { _log.AppendLine("ITEM[" + i + "] UNWRAP FAIL: " + ex.GetType().Name + " - " + ex.Message); value = ""; }
-                    }
-                    if (!string.IsNullOrEmpty(value) && value != type)
-                    {
-                        if (result.Length > 0) result.Append(" | ");
-                        result.Append(value);
-                    }
-                }
-                _log.AppendLine("COMPETENT POSITIONS RESULT='" + result + "'");
-            }
-            catch (Exception ex) { _log.AppendLine("LIST READ FAIL: " + ex.GetType().Name + " - " + ex.Message); }
+            catch (Exception ex) { _log.AppendLine(label + " metadata FAIL: " + ex.GetType().Name + " - " + ex.Message); }
         }
 
         private InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
@@ -407,7 +370,7 @@ namespace FM26FullPlayerProbe
                 {
                     string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                     Directory.CreateDirectory(dir);
-                    string file = Path.Combine(dir, "edge46_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                    string file = Path.Combine(dir, "edge47_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                     File.WriteAllText(file, _log.ToString(), Encoding.UTF8);
                     Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
                 }
