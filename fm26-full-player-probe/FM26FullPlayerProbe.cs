@@ -15,7 +15,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.37.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.37.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.37 FULL NATIVE GRAPH - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.37.1 FULL NATIVE GRAPH RUNTIME ADDNODE - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -75,9 +75,9 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.37 FULL NATIVE GRAPH ===");
-            _sb.AppendLine("0.36 confirmed the build wrapper exposes AddNode(Key, Key, PropertyID) exactly.");
-            _sb.AppendLine("This probe registers Node + Data + Target, assigns Bindings.Data ownership, then opens Name through the live InteropDataHandler.");
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.37.1 FULL NATIVE GRAPH RUNTIME ADDNODE ===");
+            _sb.AppendLine("Runtime metadata proves AddNode(Key, Key, PropertyID), while the reference DLL used by csc exposes a conflicting compile-time shape.");
+            _sb.AppendLine("This probe dispatches only AddNode at runtime; all other graph calls remain normal strongly typed calls.");
             _sb.AppendLine("Property tested: Name=" + NameProperty);
             _sb.AppendLine();
 
@@ -103,6 +103,7 @@ namespace FM26FullPlayerProbe
                     return;
                 }
 
+                _source = null;
                 for (int i = 0; i < objects.Count; i++)
                 {
                     var tv = objects[i];
@@ -183,8 +184,20 @@ namespace FM26FullPlayerProbe
                 _sb.AppendLine("NODE attached: parentKey=" + parentKey.m_key + " dataKeyRaw=" + dataKey.m_key + " dataKeyValid=" + dataKey.IsValid() + " propID=" + SafePropertyId(propId));
                 _sb.AppendLine("DATA before graph: keyRaw=" + _data.key.m_key + " isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
 
-                _interop.AddNode(_key, parentKey, propId);
-                _sb.AppendLine("AddNode OK");
+                try
+                {
+                    dynamic runtimeInterop = _interop;
+                    runtimeInterop.AddNode(_key, parentKey, propId);
+                    _sb.AppendLine("AddNode runtime-dispatch OK");
+                }
+                catch (Exception ex)
+                {
+                    _sb.AppendLine("AddNode runtime-dispatch FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                    _sb.AppendLine(ex.ToString());
+                    SaveAndReset();
+                    return;
+                }
+
                 _interop.AddData(dataKey);
                 _sb.AppendLine("AddData OK");
                 _interop.SetTarget(_key, dataKey);
@@ -449,7 +462,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "fullnativegraph_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "fullnativegraph_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
