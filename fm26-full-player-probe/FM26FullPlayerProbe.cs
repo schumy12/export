@@ -15,7 +15,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.37.1")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.38.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.37.1 FULL NATIVE GRAPH RUNTIME ADDNODE - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.38 TRUE CA PROBE - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -37,7 +37,8 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
-        private const uint NameProperty = 1851878757u;
+        private const uint TargetProperty = 1346584898u; // PlayerCurrentAbility
+        private const string TargetName = "PlayerCurrentAbility";
         private const float WaitSeconds = 2.0f;
 
         private BindingSubsystem _bindings;
@@ -75,10 +76,10 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.37.1 FULL NATIVE GRAPH RUNTIME ADDNODE ===");
-            _sb.AppendLine("Runtime metadata proves AddNode(Key, Key, PropertyID), while the reference DLL used by csc exposes a conflicting compile-time shape.");
-            _sb.AppendLine("This probe dispatches only AddNode at runtime; all other graph calls remain normal strongly typed calls.");
-            _sb.AppendLine("Property tested: Name=" + NameProperty);
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.38 TRUE CURRENT ABILITY ===");
+            _sb.AppendLine("0.37.1 proved the full native graph works: AddNode + AddData + SetTarget + Data ownership + InteropDataHandler.OpenChannel produced a real value.");
+            _sb.AppendLine("This probe changes only the property from Name to the internal PlayerCurrentAbility value.");
+            _sb.AppendLine("Property=" + TargetName + " id=" + TargetProperty);
             _sb.AppendLine();
 
             var showPerson = FindSelectedShowPerson(_sb);
@@ -148,7 +149,7 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_full_native_graph_name");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_true_ca");
                 _sb.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
 
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key))
@@ -166,9 +167,8 @@ namespace FM26FullPlayerProbe
                     return;
                 }
 
-                var propId = new PropertyID(NameProperty);
+                var propId = new PropertyID(TargetProperty);
                 _node.m_propID = propId;
-
                 _data = _bindings.GetNewData();
                 if (_data == null)
                 {
@@ -180,9 +180,7 @@ namespace FM26FullPlayerProbe
                 _bindings.SetTargetData(_data, _node);
                 var dataKey = _node.m_dataKey;
                 var parentKey = _node.m_parent == null ? default(Bindings.Key) : _node.m_parent.m_key;
-
                 _sb.AppendLine("NODE attached: parentKey=" + parentKey.m_key + " dataKeyRaw=" + dataKey.m_key + " dataKeyValid=" + dataKey.IsValid() + " propID=" + SafePropertyId(propId));
-                _sb.AppendLine("DATA before graph: keyRaw=" + _data.key.m_key + " isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
 
                 try
                 {
@@ -193,23 +191,19 @@ namespace FM26FullPlayerProbe
                 catch (Exception ex)
                 {
                     _sb.AppendLine("AddNode runtime-dispatch FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                    _sb.AppendLine(ex.ToString());
                     SaveAndReset();
                     return;
                 }
 
                 _interop.AddData(dataKey);
-                _sb.AppendLine("AddData OK");
                 _interop.SetTarget(_key, dataKey);
-                _sb.AppendLine("SetTarget OK");
-
                 _data.handler = _handlerInterface;
                 _data.opener = _key;
-                _sb.AppendLine("DATA after ownership: isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
+                _sb.AppendLine("GRAPH ready: AddData + SetTarget + ownership OK; hasOpenChannel=" + _data.HasOpenChannel);
 
-                var property = new Bindings.Property("Name", propId);
+                var property = new Bindings.Property(TargetName, propId);
                 var contexts = new Il2CppSystem.Collections.Generic.List<string>();
-                _sb.AppendLine("schemaAccepts=" + PersonReference.AcceptsPropertyInternal(NameProperty) + " canHandle=" + _handler.CanHandle(_source, property, contexts));
+                _sb.AppendLine("schemaAccepts=" + PersonReference.AcceptsPropertyInternal(TargetProperty) + " canHandle=" + _handler.CanHandle(_source, property, contexts));
                 _sb.AppendLine("handler channels before=" + SafeChannelCount(_handler));
                 _sb.AppendLine("interop batchedRequests before=" + SafeBatchCount(_handler));
 
@@ -219,8 +213,6 @@ namespace FM26FullPlayerProbe
                 _sb.AppendLine("channel='" + SafeChannelName(_handler, _key) + "'");
                 _sb.AppendLine("handler channels immediatelyAfterOpen=" + SafeChannelCount(_handler));
                 _sb.AppendLine("interop batchedRequests immediatelyAfterOpen=" + SafeBatchCount(_handler));
-                _sb.AppendLine("DATA immediatelyAfterOpen: isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
-
                 _waiting = true;
                 _checkAt = Time.unscaledTime + WaitSeconds;
             }
@@ -237,21 +229,21 @@ namespace FM26FullPlayerProbe
             _waiting = false;
             _sb.AppendLine();
             _sb.AppendLine("=== AFTER " + WaitSeconds + "s ===");
-
             try
             {
-                _sb.AppendLine("handler channels before close=" + SafeChannelCount(_handler));
                 _sb.AppendLine("interop batchedRequests=" + SafeBatchCount(_handler));
                 if (_data != null)
                 {
-                    _sb.AppendLine("DATA: keyRaw=" + _data.key.m_key + " isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
+                    _sb.AppendLine("DATA isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
                     var dv = _data.Value;
-                    _sb.AppendLine("DATA VALUE=" + (dv == null ? "<null>" : (SafeType(dv) + " '" + SafeText(dv) + "'")));
+                    _sb.AppendLine("DATA VALUE TYPE=" + SafeType(dv));
+                    _sb.AppendLine("DATA VALUE TEXT='" + SafeText(dv) + "'");
                 }
                 if (_node != null)
                 {
                     var nv = _node.Value;
-                    _sb.AppendLine("NODE VALUE=" + (nv == null ? "<null>" : (SafeType(nv) + " '" + SafeText(nv) + "'")));
+                    _sb.AppendLine("NODE VALUE TYPE=" + SafeType(nv));
+                    _sb.AppendLine("NODE VALUE TEXT='" + SafeText(nv) + "'");
                 }
                 bool exists = _bindings != null && _bindings.Exists(ref _key);
                 bool set = _bindings != null && _bindings.IsDataSet(_key);
@@ -259,7 +251,8 @@ namespace FM26FullPlayerProbe
                 if (exists && set)
                 {
                     var value = _bindings.Get(ref _key);
-                    _sb.AppendLine("GLOBAL VALUE=" + (value == null ? "<null>" : (SafeType(value) + " '" + SafeText(value) + "'")));
+                    _sb.AppendLine("GLOBAL VALUE TYPE=" + SafeType(value));
+                    _sb.AppendLine("GLOBAL VALUE TEXT='" + SafeText(value) + "'");
                 }
             }
             catch (Exception ex)
@@ -462,7 +455,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "fullnativegraph_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "trueca_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
