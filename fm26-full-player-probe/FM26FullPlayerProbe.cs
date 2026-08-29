@@ -15,7 +15,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.39.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.40.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -23,7 +23,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.39 TRUE PA PROBE - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.40 MULTI TRUE DATA - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -35,10 +35,24 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
-        private const uint TargetProperty = 1347436866u; // PlayerPotentialAbility
-        private const string TargetName = "PlayerPotentialAbility";
-        private const float WaitSeconds = 2.0f;
+        private struct Target
+        {
+            public string Name;
+            public uint Id;
+            public Target(string name, uint id) { Name = name; Id = id; }
+        }
 
+        private static readonly Target[] Targets = new Target[]
+        {
+            new Target("PlayerCurrentAbility", 1346584898u),
+            new Target("PlayerPotentialAbility", 1347436866u),
+            new Target("AttributeProfessionalism", 1349546607u),
+            new Target("Consistency", 1346588494u),
+            new Target("Acceleration", 892805152u),
+            new Target("Passing", 859381792u)
+        };
+
+        private const float WaitSeconds = 1.0f;
         private BindingSubsystem _bindings;
         private InteropDataHandler _handler;
         private IDataHandler _handlerInterface;
@@ -48,8 +62,10 @@ namespace FM26FullPlayerProbe
         private Bindings.Data _data;
         private TypedValue _source;
         private StringBuilder _sb;
+        private int _targetIndex;
         private bool _waiting;
         private bool _channelOpen;
+        private bool _nativeNodeAdded;
         private float _checkAt;
 
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
@@ -58,8 +74,8 @@ namespace FM26FullPlayerProbe
         {
             try
             {
-                if (!_waiting && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame) StartProbe();
-                if (_waiting && Time.unscaledTime >= _checkAt) FinishProbe();
+                if (!_waiting && _sb == null && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame) StartProbe();
+                if (_waiting && Time.unscaledTime >= _checkAt) FinishCurrentTarget();
             }
             catch (Exception ex)
             {
@@ -72,9 +88,9 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.39 TRUE POTENTIAL ABILITY ===");
-            _sb.AppendLine("0.38 returned PlayerCurrentAbility as a real backend DynamicNumber. This probe changes only the property to PlayerPotentialAbility.");
-            _sb.AppendLine("Property=" + TargetName + " id=" + TargetProperty);
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.40 MULTI TRUE DATA ===");
+            _sb.AppendLine("Sequential test on one real selected PersonReference using the proven full native graph.");
+            _sb.AppendLine("Targets: CA, PA, Professionalism, Consistency, Acceleration, Passing.");
             _sb.AppendLine();
 
             var showPerson = FindSelectedShowPerson(_sb);
@@ -111,92 +127,91 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_true_pa");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_multi_true_data");
                 _sb.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _sb.AppendLine("RESULT: created key not present in m_nodes"); SaveAndReset(); return; }
                 _node = _bindings.m_nodes[_key.m_key];
                 if (_node == null) { _sb.AppendLine("RESULT: m_nodes entry is null"); SaveAndReset(); return; }
-
-                var propId = new PropertyID(TargetProperty);
-                _node.m_propID = propId;
-                _data = _bindings.GetNewData();
-                if (_data == null) { _sb.AppendLine("RESULT: GetNewData returned null"); SaveAndReset(); return; }
-                _bindings.SetTargetData(_data, _node);
-                var dataKey = _node.m_dataKey;
-                var parentKey = _node.m_parent == null ? default(Bindings.Key) : _node.m_parent.m_key;
-                _sb.AppendLine("NODE attached: parentKey=" + parentKey.m_key + " dataKeyRaw=" + dataKey.m_key + " dataKeyValid=" + dataKey.IsValid() + " propID=" + SafePropertyId(propId));
-
-                dynamic runtimeInterop = _interop;
-                runtimeInterop.AddNode(_key, parentKey, propId);
-                _sb.AppendLine("AddNode runtime-dispatch OK");
-                _interop.AddData(dataKey);
-                _interop.SetTarget(_key, dataKey);
-                _data.handler = _handlerInterface;
-                _data.opener = _key;
-                _sb.AppendLine("GRAPH ready: hasOpenChannel=" + _data.HasOpenChannel);
-
-                var property = new Bindings.Property(TargetName, propId);
-                var contexts = new Il2CppSystem.Collections.Generic.List<string>();
-                _sb.AppendLine("schemaAccepts=" + PersonReference.AcceptsPropertyInternal(TargetProperty) + " canHandle=" + _handler.CanHandle(_source, property, contexts));
-                _sb.AppendLine("handler channels before=" + SafeChannelCount(_handler));
-                _sb.AppendLine("interop batchedRequests before=" + SafeBatchCount(_handler));
-                _handler.OpenChannel(_source, property, _key);
-                _channelOpen = true;
-                _sb.AppendLine("channel='" + SafeChannelName(_handler, _key) + "'");
-                _sb.AppendLine("handler channels immediatelyAfterOpen=" + SafeChannelCount(_handler));
-                _sb.AppendLine("interop batchedRequests immediatelyAfterOpen=" + SafeBatchCount(_handler));
-                _waiting = true;
-                _checkAt = Time.unscaledTime + WaitSeconds;
+                _targetIndex = 0;
+                StartCurrentTarget();
             }
             catch (Exception ex)
             {
-                _sb.AppendLine("GRAPH/OPEN FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                _sb.AppendLine(ex.ToString());
+                _sb.AppendLine("START FAIL: " + ex.GetType().Name + " - " + ex.Message);
                 SaveAndReset();
             }
         }
 
-        private void FinishProbe()
+        private void StartCurrentTarget()
+        {
+            if (_targetIndex >= Targets.Length)
+            {
+                _sb.AppendLine();
+                _sb.AppendLine("RESULT: all targets completed");
+                SaveAndReset();
+                return;
+            }
+
+            var t = Targets[_targetIndex];
+            _sb.AppendLine();
+            _sb.AppendLine("--- [" + _targetIndex + "] " + t.Name + " id=" + t.Id + " ---");
+            var propId = new PropertyID(t.Id);
+            _node.m_propID = propId;
+            _data = _bindings.GetNewData();
+            if (_data == null) throw new Exception("GetNewData returned null");
+            _bindings.SetTargetData(_data, _node);
+            var dataKey = _node.m_dataKey;
+            var parentKey = _node.m_parent == null ? default(Bindings.Key) : _node.m_parent.m_key;
+
+            dynamic runtimeInterop = _interop;
+            runtimeInterop.AddNode(_key, parentKey, propId);
+            _nativeNodeAdded = true;
+            _interop.AddData(dataKey);
+            _interop.SetTarget(_key, dataKey);
+            _data.handler = _handlerInterface;
+            _data.opener = _key;
+
+            var property = new Bindings.Property(t.Name, propId);
+            var contexts = new Il2CppSystem.Collections.Generic.List<string>();
+            _sb.AppendLine("dataKey=" + dataKey.m_key + " accepts=" + PersonReference.AcceptsPropertyInternal(t.Id) + " canHandle=" + _handler.CanHandle(_source, property, contexts) + " hasOpenChannel=" + _data.HasOpenChannel);
+            _handler.OpenChannel(_source, property, _key);
+            _channelOpen = true;
+            _sb.AppendLine("channel='" + SafeChannelName(_handler, _key) + "' batchedAfterOpen=" + SafeBatchCount(_handler));
+            _waiting = true;
+            _checkAt = Time.unscaledTime + WaitSeconds;
+        }
+
+        private void FinishCurrentTarget()
         {
             _waiting = false;
-            _sb.AppendLine();
-            _sb.AppendLine("=== AFTER " + WaitSeconds + "s ===");
+            var t = Targets[_targetIndex];
             try
             {
-                _sb.AppendLine("interop batchedRequests=" + SafeBatchCount(_handler));
-                if (_data != null)
-                {
-                    _sb.AppendLine("DATA isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
-                    var dv = _data.Value;
-                    _sb.AppendLine("DATA VALUE TYPE=" + SafeType(dv));
-                    _sb.AppendLine("DATA VALUE TEXT='" + SafeText(dv) + "'");
-                }
-                if (_node != null)
-                {
-                    var nv = _node.Value;
-                    _sb.AppendLine("NODE VALUE TYPE=" + SafeType(nv));
-                    _sb.AppendLine("NODE VALUE TEXT='" + SafeText(nv) + "'");
-                }
-                bool exists = _bindings != null && _bindings.Exists(ref _key);
-                bool set = _bindings != null && _bindings.IsDataSet(_key);
-                _sb.AppendLine("GLOBAL exists=" + exists + " isDataSet=" + set);
-                if (exists && set)
-                {
-                    var value = _bindings.Get(ref _key);
-                    _sb.AppendLine("GLOBAL VALUE TYPE=" + SafeType(value));
-                    _sb.AppendLine("GLOBAL VALUE TEXT='" + SafeText(value) + "'");
-                }
+                string valueType = _data == null ? "<null>" : SafeType(_data.Value);
+                string valueText = _data == null ? "<null>" : SafeText(_data.Value);
+                _sb.AppendLine("RESULT " + t.Name + ": isSet=" + (_data != null && _data.IsSet) + " type=" + valueType + " value='" + valueText + "' batched=" + SafeBatchCount(_handler));
             }
             catch (Exception ex)
             {
-                _sb.AppendLine("READBACK FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                _sb.AppendLine(ex.ToString());
+                _sb.AppendLine("READ FAIL " + t.Name + ": " + ex.GetType().Name + " - " + ex.Message);
             }
+
             CloseChannel();
-            _sb.AppendLine("handler channels after close=" + SafeChannelCount(_handler));
-            _sb.AppendLine("interop batchedRequests after close=" + SafeBatchCount(_handler));
-            _sb.AppendLine("NOTE: restart FM before repeating this diagnostic many times.");
-            SaveAndReset();
+            if (_nativeNodeAdded && _interop != null)
+            {
+                try { _interop.RemoveNode(_key); _sb.AppendLine("native RemoveNode OK"); }
+                catch (Exception ex) { _sb.AppendLine("native RemoveNode FAIL: " + ex.GetType().Name + " - " + ex.Message); SaveAndReset(); return; }
+                _nativeNodeAdded = false;
+            }
+
+            _data = null;
+            _targetIndex++;
+            try { StartCurrentTarget(); }
+            catch (Exception ex)
+            {
+                _sb.AppendLine("NEXT TARGET FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                SaveAndReset();
+            }
         }
 
         private InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
@@ -234,10 +249,7 @@ namespace FM26FullPlayerProbe
         }
 
         private static int SafeBatchCount(InteropDataHandler h) { try { return h == null || h.m_interop == null || h.m_interop.m_batchedRequests == null ? -1 : h.m_interop.m_batchedRequests.Count; } catch { return -2; } }
-        private static int SafeChannelCount(InteropDataHandler h) { try { return h == null || h.m_channels == null ? -1 : h.m_channels.Count; } catch { return -2; } }
         private static string SafeChannelName(InteropDataHandler h, Bindings.Key k) { try { if (h != null && h.m_channels != null && h.m_channels.ContainsKey(k.m_key)) return h.m_channels[k.m_key] ?? "<null>"; } catch { } return "<none>"; }
-        private static string SafeHandlerPointer(Bindings.Data d) { try { return d == null || d.handler == null ? "<null>" : "0x" + d.handler.Pointer.ToString("X"); } catch { return "<failed>"; } }
-        private static string SafePropertyId(PropertyID id) { try { return id.ToString(); } catch { return "<failed>"; } }
         private static string SafeType(TypedValue tv) { try { return tv == null || tv.DataType == null ? "<null>" : tv.DataType.FullName; } catch { return "<failed>"; } }
         private static string SafeText(TypedValue tv) { try { return tv == null ? "<null>" : (tv.AsString() ?? ""); } catch (Exception ex) { return "<" + ex.GetType().Name + ">"; } }
 
@@ -280,24 +292,34 @@ namespace FM26FullPlayerProbe
         {
             fixed (char* p = name) { var span = new Il2CppSystem.ReadOnlySpan<char>((void*)p, name.Length); return bindings.Create(ref span, Bindings.NodeFlags.Temporary); }
         }
+
         private void CloseChannel()
         {
             if (!_channelOpen || _handler == null) return;
             try { _handler.CloseChannel(_key); } catch (Exception ex) { try { _sb?.AppendLine("CLOSE FAIL: " + ex.GetType().Name + " - " + ex.Message); } catch { } }
             _channelOpen = false;
         }
+
         private void SaveAndReset()
         {
-            CloseChannel(); _waiting = false; if (_sb != null) Save(_sb);
+            CloseChannel();
+            if (_nativeNodeAdded && _interop != null)
+            {
+                try { _interop.RemoveNode(_key); } catch { }
+                _nativeNodeAdded = false;
+            }
+            _waiting = false;
+            if (_sb != null) Save(_sb);
             _data = null; _node = null; _source = null; _handlerInterface = null; _handler = null; _interop = null; _bindings = null; _sb = null;
         }
+
         private static void Save(StringBuilder sb)
         {
             try
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "truepa_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "multitrue_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
