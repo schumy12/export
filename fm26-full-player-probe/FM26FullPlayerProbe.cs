@@ -16,7 +16,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.50.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.51.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.50 MULTI-SELECT FULL TRUE CSV - select player rows and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.51 FAST MULTI-SELECT FULL TRUE CSV - select player rows and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -63,7 +63,6 @@ namespace FM26FullPlayerProbe
 
         private static readonly Target[] Targets = new Target[]
         {
-            // Identity / profile
             new Target("UniqueId", "UniqueId", 1970170212u),
             new Target("Name", "Name", 1851878757u),
             new Target("Surname", "Surname", 843789105u),
@@ -90,11 +89,9 @@ namespace FM26FullPlayerProbe
             new Target("Positions", "PositionCombinedStringLong", 2019119186u),
             new Target("CompetentPositions", "CompetentPositionsListLong", 1483174254u, TargetMode.TypedValueList),
 
-            // True ability / potential
             new Target("PlayerCurrentAbility", "PlayerCurrentAbility", 1346584898u),
             new Target("PlayerPotentialAbility", "PlayerPotentialAbility", 1347436866u),
 
-            // Hidden personality / consistency
             new Target("Adaptability", "AttributeAdaptability", 1348559969u),
             new Target("Ambition", "AttributeAmbition", 1348562274u),
             new Target("Controversy", "AttributeControversy", 1348695673u),
@@ -108,7 +105,6 @@ namespace FM26FullPlayerProbe
             new Target("InjuryProneness", "InjuryProneness", 1349087346u),
             new Target("Versatility", "Versatility", 1349936498u),
 
-            // Technical / mental / physical / goalkeeper
             new Target("Acceleration", "Acceleration", 892805152u),
             new Target("AerialReach", "AerialReach", 926232624u),
             new Target("Aggression", "Aggression", 875765792u),
@@ -159,7 +155,8 @@ namespace FM26FullPlayerProbe
         };
 
         private const uint NamePropertyId = 1851878757u;
-        private const float WaitSeconds = 0.50f;
+        private const float PollDelaySeconds = 0.02f;
+        private const float QueryTimeoutSeconds = 2.00f;
 
         private readonly List<PlayerRow> _players = new List<PlayerRow>();
         private BindingSubsystem _bindings;
@@ -177,7 +174,10 @@ namespace FM26FullPlayerProbe
         private bool _channelOpen;
         private bool _nativeNodeAdded;
         private bool _resolvingReferenceName;
-        private float _checkAt;
+        private float _pollAfter;
+        private float _timeoutAt;
+        private float _queryStartedAt;
+        private int _timeoutCount;
 
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
 
@@ -188,7 +188,7 @@ namespace FM26FullPlayerProbe
             try
             {
                 if (!_waiting && _log == null && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame) StartExport();
-                if (_waiting && Time.unscaledTime >= _checkAt) FinishCurrentQuery();
+                if (_waiting) PollCurrentQuery();
             }
             catch (Exception ex)
             {
@@ -198,13 +198,41 @@ namespace FM26FullPlayerProbe
             }
         }
 
+        private void PollCurrentQuery()
+        {
+            float now = Time.unscaledTime;
+            if (now < _pollAfter) return;
+
+            bool ready = false;
+            try { ready = _data != null && _data.IsSet; } catch { }
+
+            if (ready)
+            {
+                FinishCurrentQuery(false);
+                return;
+            }
+
+            if (now >= _timeoutAt)
+            {
+                _timeoutCount++;
+                try
+                {
+                    var t = Targets[_targetIndex];
+                    _log.AppendLine("  TIMEOUT after " + ((now - _queryStartedAt) * 1000f).ToString("0") + " ms on " + t.OutputName + (_resolvingReferenceName ? " nested Name" : ""));
+                }
+                catch { }
+                FinishCurrentQuery(true);
+            }
+        }
+
         private void StartExport()
         {
             _players.Clear();
+            _timeoutCount = 0;
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.50 MULTI-SELECT FULL TRUE CSV ===");
-            _log.AppendLine("Exports every selected PersonReference into one CSV with cleaned profile data, true CA/PA, hidden attributes and all player attributes.");
-            _log.AppendLine("TargetsPerPlayer=" + Targets.Length + " waitPerQuery=" + WaitSeconds.ToString("0.00") + "s");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.51 FAST MULTI-SELECT FULL TRUE CSV ===");
+            _log.AppendLine("Polls IsSet every frame instead of waiting a fixed 0.50s. Keeps a 2.00s safety timeout per query.");
+            _log.AppendLine("TargetsPerPlayer=" + Targets.Length + " pollDelay=" + PollDelaySeconds.ToString("0.00") + "s timeout=" + QueryTimeoutSeconds.ToString("0.00") + "s");
             _log.AppendLine();
 
             var showPerson = FindSelectedShowPerson(_log);
@@ -250,7 +278,7 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_multi_select_full_true_csv");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_fast_multi_select_full_true_csv");
                 _log.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _log.AppendLine("RESULT: created key not present in m_nodes"); SaveAndReset(false); return; }
                 _node = _bindings.m_nodes[_key.m_key];
@@ -271,7 +299,7 @@ namespace FM26FullPlayerProbe
             if (_playerIndex >= _players.Count)
             {
                 _log.AppendLine();
-                _log.AppendLine("RESULT: all selected players completed; writing CSV");
+                _log.AppendLine("RESULT: all selected players completed; writing CSV; timeouts=" + _timeoutCount);
                 SaveAndReset(true);
                 return;
             }
@@ -317,10 +345,12 @@ namespace FM26FullPlayerProbe
             _handler.OpenChannel(source, property, _key);
             _channelOpen = true;
             _waiting = true;
-            _checkAt = Time.unscaledTime + WaitSeconds;
+            _queryStartedAt = Time.unscaledTime;
+            _pollAfter = _queryStartedAt + PollDelaySeconds;
+            _timeoutAt = _queryStartedAt + QueryTimeoutSeconds;
         }
 
-        private void FinishCurrentQuery()
+        private void FinishCurrentQuery(bool timedOut)
         {
             _waiting = false;
             var t = Targets[_targetIndex];
@@ -335,7 +365,7 @@ namespace FM26FullPlayerProbe
 
             if (_resolvingReferenceName)
             {
-                string resolved = isSet && tv != null ? CleanUiString(SafeText(tv)) : "";
+                string resolved = !timedOut && isSet && tv != null ? CleanUiString(SafeText(tv)) : "";
                 CurrentPlayer.Values[t.OutputName] = resolved;
                 _log.AppendLine("  RESOLVED='" + resolved + "'");
                 CleanupCurrentGraph();
@@ -345,7 +375,7 @@ namespace FM26FullPlayerProbe
                 return;
             }
 
-            if (t.Mode == TargetMode.ResolveReferenceName && isSet && tv != null && SafeType(tv).EndsWith("Reference"))
+            if (!timedOut && t.Mode == TargetMode.ResolveReferenceName && isSet && tv != null && SafeType(tv).EndsWith("Reference"))
             {
                 var nestedSource = tv;
                 CleanupCurrentGraph();
@@ -366,7 +396,7 @@ namespace FM26FullPlayerProbe
             string finalValue = "";
             try
             {
-                if (!isSet || tv == null) finalValue = "";
+                if (timedOut || !isSet || tv == null) finalValue = "";
                 else if (t.Mode == TargetMode.Footedness) finalValue = ParsePreferredFoot(tv);
                 else if (t.Mode == TargetMode.TypedValueList) finalValue = ReadTypedValueList(tv);
                 else if (SafeType(tv) == "SI.Bindable.DynamicReference")
@@ -384,7 +414,7 @@ namespace FM26FullPlayerProbe
             }
 
             CurrentPlayer.Values[t.OutputName] = finalValue;
-            _log.AppendLine("  VALUE='" + finalValue + "'");
+            _log.AppendLine("  VALUE='" + finalValue + "' responseMs=" + ((Time.unscaledTime - _queryStartedAt) * 1000f).ToString("0"));
             CleanupCurrentGraph();
             _targetIndex++;
             StartCurrentTarget();
