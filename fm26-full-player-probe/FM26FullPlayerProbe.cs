@@ -15,7 +15,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.40.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.41.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -23,7 +23,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.40 MULTI TRUE DATA - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.41 DYNAMIC REFERENCE VALUE RESOLVER - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -88,8 +88,9 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.40 MULTI TRUE DATA ===");
-            _sb.AppendLine("Sequential test on one real selected PersonReference using the proven full native graph.");
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.41 DYNAMIC REFERENCE VALUE RESOLVER ===");
+            _sb.AppendLine("0.40 proved CA/PA return DynamicNumber while player/hidden attributes return SI.Bindable.DynamicReference.");
+            _sb.AppendLine("This probe uses VisualFunctionLibrary.GetDynamicReference + GetPropertyValue to unwrap those references.");
             _sb.AppendLine("Targets: CA, PA, Professionalism, Consistency, Acceleration, Passing.");
             _sb.AppendLine();
 
@@ -127,7 +128,7 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_multi_true_data");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_dynamic_reference_resolver");
                 _sb.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _sb.AppendLine("RESULT: created key not present in m_nodes"); SaveAndReset(); return; }
                 _node = _bindings.m_nodes[_key.m_key];
@@ -187,9 +188,28 @@ namespace FM26FullPlayerProbe
             var t = Targets[_targetIndex];
             try
             {
-                string valueType = _data == null ? "<null>" : SafeType(_data.Value);
-                string valueText = _data == null ? "<null>" : SafeText(_data.Value);
-                _sb.AppendLine("RESULT " + t.Name + ": isSet=" + (_data != null && _data.IsSet) + " type=" + valueType + " value='" + valueText + "' batched=" + SafeBatchCount(_handler));
+                var tv = _data == null ? null : _data.Value;
+                string valueType = SafeType(tv);
+                string valueText = SafeText(tv);
+                _sb.AppendLine("RAW " + t.Name + ": isSet=" + (_data != null && _data.IsSet) + " type=" + valueType + " value='" + valueText + "' batched=" + SafeBatchCount(_handler));
+
+                if (valueType == "SI.Bindable.DynamicReference")
+                {
+                    try
+                    {
+                        var dyn = VisualFunctionLibrary.GetDynamicReference(tv);
+                        var inner = VisualFunctionLibrary.GetPropertyValue(dyn);
+                        _sb.AppendLine("UNWRAPPED " + t.Name + ": type=" + SafeType(inner) + " value='" + SafeText(inner) + "'");
+                    }
+                    catch (Exception ex)
+                    {
+                        _sb.AppendLine("UNWRAP FAIL " + t.Name + ": " + ex.GetType().Name + " - " + ex.Message);
+                    }
+                }
+                else
+                {
+                    _sb.AppendLine("UNWRAPPED " + t.Name + ": not-needed");
+                }
             }
             catch (Exception ex)
             {
@@ -319,7 +339,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "multitrue_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "dynresolve_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
