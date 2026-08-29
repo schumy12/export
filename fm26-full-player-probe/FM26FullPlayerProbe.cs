@@ -15,19 +15,17 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.48.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.49.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
         private static ProbeBehaviour _behaviour;
-
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.48 FOOT DYNAMIC ENTRIES - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.49 READABLE FOOT PARSER - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
-
         public override bool Unload()
         {
             if (_behaviour != null) UnityEngine.Object.Destroy(_behaviour);
@@ -74,8 +72,8 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.48 FOOT DYNAMIC ENTRIES ===");
-            _log.AppendLine("0.47 proved DynamicReference is dictionary-like. This probe enumerates its actual UInt32 -> TypedValue entries using direct wrapper APIs.");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.49 READABLE FOOT PARSER ===");
+            _log.AppendLine("0.48 exposed the real Footedness DynamicReference entries. This version extracts a readable preferred-foot label and logs the known numeric/text subfields.");
             _log.AppendLine();
 
             var showPerson = FindSelectedShowPerson(_log);
@@ -110,7 +108,7 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_foot_dynamic_entries");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_readable_foot_parser");
                 _log.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _log.AppendLine("RESULT: node missing"); SaveAndReset(); return; }
                 _node = _bindings.m_nodes[_key.m_key];
@@ -122,7 +120,6 @@ namespace FM26FullPlayerProbe
                 _bindings.SetTargetData(_data, _node);
                 var dataKey = _node.m_dataKey;
                 var parentKey = _node.m_parent == null ? default(Bindings.Key) : _node.m_parent.m_key;
-
                 dynamic runtimeInterop = _interop;
                 runtimeInterop.AddNode(_key, parentKey, propId);
                 _nativeNodeAdded = true;
@@ -155,49 +152,50 @@ namespace FM26FullPlayerProbe
                 bool isSet = _data != null && _data.IsSet;
                 var tv = _data == null ? null : _data.Value;
                 _log.AppendLine("RAW isSet=" + isSet + " type=" + SafeType(tv) + " value='" + CleanUiString(SafeText(tv)) + "'");
-                if (isSet && tv != null && SafeType(tv) == "SI.Bindable.DynamicReference")
-                    EnumerateDynamicReference(tv);
+                if (isSet && tv != null && SafeType(tv) == "SI.Bindable.DynamicReference") ParseFoot(tv);
             }
             catch (Exception ex) { _log.AppendLine("FINISH FAIL: " + ex.GetType().Name + " - " + ex.Message); }
-
             _log.AppendLine();
-            _log.AppendLine("RESULT: foot dynamic entry probe completed");
+            _log.AppendLine("RESULT: readable foot parser completed");
             SaveAndReset();
         }
 
-        private void EnumerateDynamicReference(TypedValue tv)
+        private void ParseFoot(TypedValue tv)
         {
             try
             {
                 var dyn = VisualFunctionLibrary.GetDynamicReference(tv);
-                _log.AppendLine("DYN ptr=0x" + dyn.Pointer.ToString("X") + " Count=" + dyn.Count);
-                var keys = dyn.Keys;
+                _log.AppendLine("DYN Count=" + dyn.Count);
+                string preferred = "";
+                var numeric = new StringBuilder();
+                var text = new StringBuilder();
                 int n = 0;
-                foreach (uint key in keys)
+                foreach (uint key in dyn.Keys)
                 {
-                    string description = "";
-                    string kind = "";
-                    try { description = DynamicReference.GetPropertyDescriptionInternal(key); } catch (Exception ex) { description = "<desc fail: " + ex.GetType().Name + ">"; }
-                    try { kind = DynamicReference.GetPropertyTypeInternal(key).ToString(); } catch (Exception ex) { kind = "<kind fail: " + ex.GetType().Name + ">"; }
-
                     TypedValue value = null;
-                    try { value = dyn[key]; }
-                    catch (Exception ex)
-                    {
-                        _log.AppendLine("ENTRY[" + n + "] key=" + key + " desc='" + description + "' kind=" + kind + " READ FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                        n++;
-                        continue;
-                    }
+                    try { value = dyn[key]; } catch { n++; continue; }
+                    string type = SafeType(value);
+                    string val = CleanUiString(SafeText(value));
+                    _log.AppendLine("ENTRY[" + n + "] key=" + key + " type=" + type + " value='" + val + "'");
 
-                    _log.AppendLine("ENTRY[" + n + "] key=" + key + " desc='" + description + "' kind=" + kind + " type=" + SafeType(value) + " value='" + CleanUiString(SafeText(value)) + "'");
+                    if (type == "System.String")
+                    {
+                        if (text.Length > 0) text.Append(" | ");
+                        text.Append(key).Append("=").Append(val);
+                        if (preferred.Length == 0 && (val == "Sinistro" || val == "Destro" || val == "Entrambi" || val == "Sinistra" || val == "Destra")) preferred = val;
+                    }
+                    else if (type == "SI.Core.DynamicNumber")
+                    {
+                        if (numeric.Length > 0) numeric.Append(" | ");
+                        numeric.Append(key).Append("=").Append(val);
+                    }
                     n++;
                 }
-                _log.AppendLine("ENUMERATED entries=" + n);
+                _log.AppendLine("PREFERRED_FOOT='" + preferred + "'");
+                _log.AppendLine("FOOT_NUMERIC_FIELDS='" + numeric + "'");
+                _log.AppendLine("FOOT_TEXT_FIELDS='" + text + "'");
             }
-            catch (Exception ex)
-            {
-                _log.AppendLine("DYNAMIC ENUM FAIL: " + ex.GetType().Name + " - " + ex.Message);
-            }
+            catch (Exception ex) { _log.AppendLine("PARSE FAIL: " + ex.GetType().Name + " - " + ex.Message); }
         }
 
         private InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
@@ -235,7 +233,6 @@ namespace FM26FullPlayerProbe
 
         private static string SafeType(TypedValue tv) { try { return tv == null || tv.DataType == null ? "<null>" : tv.DataType.FullName; } catch { return "<failed>"; } }
         private static string SafeText(TypedValue tv) { try { return tv == null ? "" : (tv.AsString() ?? ""); } catch { return ""; } }
-
         private static string CleanUiString(string s)
         {
             if (string.IsNullOrEmpty(s)) return "";
@@ -264,7 +261,6 @@ namespace FM26FullPlayerProbe
             catch (Exception ex) { sb.AppendLine("FindSelected FAIL: " + ex.GetType().Name + " - " + ex.Message); }
             return null;
         }
-
         private static VisualElement FindSelectedRecursive(VisualElement ve)
         {
             if (ve == null) return null;
@@ -273,7 +269,6 @@ namespace FM26FullPlayerProbe
             for (int i = 0; i < count; i++) { VisualElement child = null; try { child = ve[i]; } catch { } var found = FindSelectedRecursive(child); if (found != null) return found; }
             return null;
         }
-
         private static VisualElement FindNamedRecursive(VisualElement ve, string name)
         {
             if (ve == null) return null;
@@ -282,30 +277,26 @@ namespace FM26FullPlayerProbe
             for (int i = 0; i < count; i++) { VisualElement child = null; try { child = ve[i]; } catch { } var found = FindNamedRecursive(child, name); if (found != null) return found; }
             return null;
         }
-
         private static unsafe Bindings.Key CreateTemporaryNode(BindingSubsystem bindings, string name)
         {
             fixed (char* p = name) { var span = new Il2CppSystem.ReadOnlySpan<char>((void*)p, name.Length); return bindings.Create(ref span, Bindings.NodeFlags.Temporary); }
         }
-
         private void CloseChannel()
         {
             if (!_channelOpen || _handler == null) return;
-            try { _handler.CloseChannel(_key); } catch (Exception ex) { try { _log?.AppendLine("CLOSE FAIL: " + ex.GetType().Name + " - " + ex.Message); } catch { } }
+            try { _handler.CloseChannel(_key); } catch { }
             _channelOpen = false;
         }
-
         private void CleanupGraph()
         {
             CloseChannel();
             if (_nativeNodeAdded && _interop != null)
             {
-                try { _interop.RemoveNode(_key); } catch (Exception ex) { try { _log?.AppendLine("RemoveNode FAIL: " + ex.GetType().Name + " - " + ex.Message); } catch { } }
+                try { _interop.RemoveNode(_key); } catch { }
                 _nativeNodeAdded = false;
             }
             _data = null;
         }
-
         private void SaveAndReset()
         {
             CleanupGraph();
@@ -316,7 +307,7 @@ namespace FM26FullPlayerProbe
                 {
                     string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                     Directory.CreateDirectory(dir);
-                    string file = Path.Combine(dir, "edge48_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                    string file = Path.Combine(dir, "edge49_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                     File.WriteAllText(file, _log.ToString(), Encoding.UTF8);
                     Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
                 }
