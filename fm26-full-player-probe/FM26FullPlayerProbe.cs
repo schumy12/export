@@ -16,7 +16,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.42.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.42.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.42 SELECTED PLAYER TRUE CSV - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.42.1 SELECTED PLAYER TRUE CSV - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -122,7 +122,7 @@ namespace FM26FullPlayerProbe
         private StringBuilder _log;
         private readonly Dictionary<string, string> _values = new Dictionary<string, string>();
         private int _personIndex;
-        private int _personData1;
+        private long _personData1;
         private int _targetIndex;
         private bool _waiting;
         private bool _channelOpen;
@@ -150,7 +150,7 @@ namespace FM26FullPlayerProbe
         {
             _values.Clear();
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.42 SELECTED PLAYER TRUE CSV ===");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.42.1 SELECTED PLAYER TRUE CSV ===");
             _log.AppendLine("Exports CA, PA, hidden personality attributes and all standard player attributes from the real backend PersonReference.");
             _log.AppendLine("Targets=" + Targets.Length + " waitPerTarget=" + WaitSeconds.ToString("0.00") + "s");
             _log.AppendLine();
