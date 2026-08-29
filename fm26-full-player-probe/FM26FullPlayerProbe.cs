@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using System.Text;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
 using UnityEngine;
@@ -16,7 +15,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.47.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.48.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -25,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.47 FOOT DYNAMIC METADATA - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.48 FOOT DYNAMIC ENTRIES - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -39,8 +38,7 @@ namespace FM26FullPlayerProbe
     public sealed class ProbeBehaviour : MonoBehaviour
     {
         private const uint FootednessId = 1244885353u;
-        private const uint CompetentPositionsId = 1483174254u;
-        private const float WaitSeconds = 0.60f;
+        private const float WaitSeconds = 0.70f;
 
         private BindingSubsystem _bindings;
         private InteropDataHandler _handler;
@@ -51,7 +49,6 @@ namespace FM26FullPlayerProbe
         private Bindings.Data _data;
         private TypedValue _source;
         private StringBuilder _log;
-        private int _stage;
         private bool _waiting;
         private bool _channelOpen;
         private bool _nativeNodeAdded;
@@ -64,7 +61,7 @@ namespace FM26FullPlayerProbe
             try
             {
                 if (!_waiting && _log == null && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame) StartProbe();
-                if (_waiting && Time.unscaledTime >= _checkAt) FinishStage();
+                if (_waiting && Time.unscaledTime >= _checkAt) FinishProbe();
             }
             catch (Exception ex)
             {
@@ -77,8 +74,8 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.47 FOOT DYNAMIC METADATA ===");
-            _log.AppendLine("0.46 proved Footedness is DynamicReference but GetPropertyValue asks for missing key 1886680684. This probe dumps DynamicReference metadata only, without invoking arbitrary reflected getters.");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.48 FOOT DYNAMIC ENTRIES ===");
+            _log.AppendLine("0.47 proved DynamicReference is dictionary-like. This probe enumerates its actual UInt32 -> TypedValue entries using direct wrapper APIs.");
             _log.AppendLine();
 
             var showPerson = FindSelectedShowPerson(_log);
@@ -113,12 +110,35 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_foot_dynamic_metadata");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_foot_dynamic_entries");
                 _log.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _log.AppendLine("RESULT: node missing"); SaveAndReset(); return; }
                 _node = _bindings.m_nodes[_key.m_key];
-                _stage = 0;
-                StartStage();
+
+                var propId = new PropertyID(FootednessId);
+                _node.m_propID = propId;
+                _data = _bindings.GetNewData();
+                if (_data == null) throw new Exception("GetNewData returned null");
+                _bindings.SetTargetData(_data, _node);
+                var dataKey = _node.m_dataKey;
+                var parentKey = _node.m_parent == null ? default(Bindings.Key) : _node.m_parent.m_key;
+
+                dynamic runtimeInterop = _interop;
+                runtimeInterop.AddNode(_key, parentKey, propId);
+                _nativeNodeAdded = true;
+                _interop.AddData(dataKey);
+                _interop.SetTarget(_key, dataKey);
+                _data.handler = _handlerInterface;
+                _data.opener = _key;
+
+                var property = new Bindings.Property("Footedness", propId);
+                var contexts = new Il2CppSystem.Collections.Generic.List<string>();
+                bool canHandle = _handler.CanHandle(_source, property, contexts);
+                _log.AppendLine("OPEN Footedness accepts=" + PersonReference.AcceptsPropertyInternal(FootednessId) + " canHandle=" + canHandle);
+                _handler.OpenChannel(_source, property, _key);
+                _channelOpen = true;
+                _waiting = true;
+                _checkAt = Time.unscaledTime + WaitSeconds;
             }
             catch (Exception ex)
             {
@@ -127,131 +147,57 @@ namespace FM26FullPlayerProbe
             }
         }
 
-        private void StartStage()
-        {
-            if (_stage >= 2)
-            {
-                _log.AppendLine();
-                _log.AppendLine("RESULT: dynamic metadata probe completed");
-                SaveAndReset();
-                return;
-            }
-
-            string name = _stage == 0 ? "Footedness" : "CompetentPositionsListLong";
-            uint id = _stage == 0 ? FootednessId : CompetentPositionsId;
-            var propId = new PropertyID(id);
-            _node.m_propID = propId;
-            _data = _bindings.GetNewData();
-            if (_data == null) throw new Exception("GetNewData returned null");
-            _bindings.SetTargetData(_data, _node);
-            var dataKey = _node.m_dataKey;
-            var parentKey = _node.m_parent == null ? default(Bindings.Key) : _node.m_parent.m_key;
-
-            dynamic runtimeInterop = _interop;
-            runtimeInterop.AddNode(_key, parentKey, propId);
-            _nativeNodeAdded = true;
-            _interop.AddData(dataKey);
-            _interop.SetTarget(_key, dataKey);
-            _data.handler = _handlerInterface;
-            _data.opener = _key;
-
-            var property = new Bindings.Property(name, propId);
-            var contexts = new Il2CppSystem.Collections.Generic.List<string>();
-            bool canHandle = _handler.CanHandle(_source, property, contexts);
-            _log.AppendLine();
-            _log.AppendLine("STAGE " + _stage + " " + name + " canHandle=" + canHandle);
-            _handler.OpenChannel(_source, property, _key);
-            _channelOpen = true;
-            _waiting = true;
-            _checkAt = Time.unscaledTime + WaitSeconds;
-        }
-
-        private void FinishStage()
+        private void FinishProbe()
         {
             _waiting = false;
-            TypedValue tv = null;
-            bool isSet = false;
             try
             {
-                isSet = _data != null && _data.IsSet;
-                tv = _data == null ? null : _data.Value;
+                bool isSet = _data != null && _data.IsSet;
+                var tv = _data == null ? null : _data.Value;
                 _log.AppendLine("RAW isSet=" + isSet + " type=" + SafeType(tv) + " value='" + CleanUiString(SafeText(tv)) + "'");
+                if (isSet && tv != null && SafeType(tv) == "SI.Bindable.DynamicReference")
+                    EnumerateDynamicReference(tv);
             }
-            catch (Exception ex) { _log.AppendLine("RAW READ FAIL: " + ex.GetType().Name + " - " + ex.Message); }
+            catch (Exception ex) { _log.AppendLine("FINISH FAIL: " + ex.GetType().Name + " - " + ex.Message); }
 
-            if (isSet && tv != null)
-            {
-                if (_stage == 0) InspectFootedness(tv);
-                else InspectCompetentPositions(tv);
-            }
-
-            CleanupGraph();
-            _stage++;
-            try { StartStage(); }
-            catch (Exception ex) { _log.AppendLine("NEXT FAIL: " + ex.GetType().Name + " - " + ex.Message); SaveAndReset(); }
+            _log.AppendLine();
+            _log.AppendLine("RESULT: foot dynamic entry probe completed");
+            SaveAndReset();
         }
 
-        private void InspectFootedness(TypedValue tv)
+        private void EnumerateDynamicReference(TypedValue tv)
         {
-            if (SafeType(tv) != "SI.Bindable.DynamicReference")
-            {
-                _log.AppendLine("FOOT not DynamicReference");
-                return;
-            }
-
             try
             {
                 var dyn = VisualFunctionLibrary.GetDynamicReference(tv);
-                _log.AppendLine("FOOT dyn ptr=0x" + dyn.Pointer.ToString("X"));
-                DumpTypeMetadata(typeof(DynamicReference), "DynamicReference");
-            }
-            catch (Exception ex) { _log.AppendLine("FOOT GetDynamicReference FAIL: " + ex.GetType().Name + " - " + ex.Message); }
-        }
-
-        private void InspectCompetentPositions(TypedValue tv)
-        {
-            try
-            {
-                var list = tv.Get<Il2CppSystem.Collections.Generic.List<TypedValue>>();
-                if (list == null) { _log.AppendLine("POSITION LIST null"); return; }
-                _log.AppendLine("POSITION LIST count=" + list.Count);
-                for (int i = 0; i < list.Count; i++)
+                _log.AppendLine("DYN ptr=0x" + dyn.Pointer.ToString("X") + " Count=" + dyn.Count);
+                var keys = dyn.Keys;
+                int n = 0;
+                foreach (uint key in keys)
                 {
-                    var item = list[i];
-                    _log.AppendLine("POSITION ITEM[" + i + "] type=" + SafeType(item) + " raw='" + CleanUiString(SafeText(item)) + "'");
-                    if (SafeType(item) == "SI.Bindable.DynamicReference")
+                    string description = "";
+                    string kind = "";
+                    try { description = DynamicReference.GetPropertyDescriptionInternal(key); } catch (Exception ex) { description = "<desc fail: " + ex.GetType().Name + ">"; }
+                    try { kind = DynamicReference.GetPropertyTypeInternal(key).ToString(); } catch (Exception ex) { kind = "<kind fail: " + ex.GetType().Name + ">"; }
+
+                    TypedValue value = null;
+                    try { value = dyn[key]; }
+                    catch (Exception ex)
                     {
-                        try
-                        {
-                            var dyn = VisualFunctionLibrary.GetDynamicReference(item);
-                            var inner = VisualFunctionLibrary.GetPropertyValue(dyn);
-                            _log.AppendLine("POSITION ITEM[" + i + "] valueType=" + SafeType(inner) + " value='" + CleanUiString(SafeText(inner)) + "'");
-                        }
-                        catch (Exception ex) { _log.AppendLine("POSITION ITEM[" + i + "] FAIL: " + ex.GetType().Name + " - " + ex.Message); }
+                        _log.AppendLine("ENTRY[" + n + "] key=" + key + " desc='" + description + "' kind=" + kind + " READ FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                        n++;
+                        continue;
                     }
-                }
-            }
-            catch (Exception ex) { _log.AppendLine("POSITION LIST READ FAIL: " + ex.GetType().Name + " - " + ex.Message); }
-        }
 
-        private void DumpTypeMetadata(Type type, string label)
-        {
-            try
-            {
-                _log.AppendLine("--- " + label + " metadata ---");
-                foreach (var p in type.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static))
-                    _log.AppendLine("PROP " + (p.GetMethod != null && p.GetMethod.IsStatic ? "static " : "") + p.PropertyType.FullName + " " + p.Name);
-                foreach (var f in type.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static))
-                    _log.AppendLine("FIELD " + (f.IsStatic ? "static " : "") + f.FieldType.FullName + " " + f.Name);
-                foreach (var m in type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly))
-                {
-                    var ps = m.GetParameters();
-                    var sb = new StringBuilder();
-                    for (int i = 0; i < ps.Length; i++) { if (i > 0) sb.Append(", "); sb.Append(ps[i].ParameterType.FullName); }
-                    _log.AppendLine("METHOD " + (m.IsStatic ? "static " : "") + m.ReturnType.FullName + " " + m.Name + "(" + sb + ")");
+                    _log.AppendLine("ENTRY[" + n + "] key=" + key + " desc='" + description + "' kind=" + kind + " type=" + SafeType(value) + " value='" + CleanUiString(SafeText(value)) + "'");
+                    n++;
                 }
+                _log.AppendLine("ENUMERATED entries=" + n);
             }
-            catch (Exception ex) { _log.AppendLine(label + " metadata FAIL: " + ex.GetType().Name + " - " + ex.Message); }
+            catch (Exception ex)
+            {
+                _log.AppendLine("DYNAMIC ENUM FAIL: " + ex.GetType().Name + " - " + ex.Message);
+            }
         }
 
         private InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
@@ -370,7 +316,7 @@ namespace FM26FullPlayerProbe
                 {
                     string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                     Directory.CreateDirectory(dir);
-                    string file = Path.Combine(dir, "edge47_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                    string file = Path.Combine(dir, "edge48_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                     File.WriteAllText(file, _log.ToString(), Encoding.UTF8);
                     Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
                 }
