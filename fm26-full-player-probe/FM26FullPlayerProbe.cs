@@ -14,7 +14,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.30.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.30.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -23,7 +23,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.30 SELECTED UI CONTEXT REFERENCE - select one player in Recruitment > Players in Range and press F8.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.30.1 SELECTED UI CONTEXT REFERENCE - select one player in Recruitment > Players in Range and press F8.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -71,7 +71,7 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.30 SELECTED UI CONTEXT REFERENCE ===");
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.30.1 SELECTED UI CONTEXT REFERENCE ===");
             _sb.AppendLine("0.29 proved synthetic PersonReference indices 0..31 open native channels but resolve no data.");
             _sb.AppendLine("This probe retrieves context-menu TypedValue objects from the actually selected ShowPerson element, then asks the live InteropDataHandler for UniqueId using that exact object.");
             _sb.AppendLine("No Harmony. No reflection getter invocation. No Bindings.Remove.");
@@ -90,10 +90,10 @@ namespace FM26FullPlayerProbe
             Il2CppSystem.Collections.Generic.List<TypedValue> objects = null;
             try
             {
-                BindingPath bindingPath = default;
-                ActionGroupings actionGroupings = default;
-                bool multiple = false;
-                objects = PluginContextMenuContributor.GetContextMenuObjects(showPerson, ref bindingPath, ref actionGroupings, ref multiple);
+                BindingPath bindingPath;
+                ActionGroupings actionGroupings;
+                bool multiple;
+                objects = PluginContextMenuContributor.GetContextMenuObjects(showPerson, out bindingPath, out actionGroupings, out multiple);
                 _sb.AppendLine("GetContextMenuObjects returned count=" + (objects == null ? -1 : objects.Count) + " multiple=" + multiple);
             }
             catch (Exception ex)
