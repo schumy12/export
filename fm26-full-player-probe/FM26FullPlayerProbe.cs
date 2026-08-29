@@ -16,7 +16,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.43.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.44.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.43 SELECTED PLAYER FULL TRUE CSV - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.44 PROFILE CLEANUP - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -38,107 +38,52 @@ namespace FM26FullPlayerProbe
     {
         private struct Target
         {
-            public string Name;
+            public string OutputName;
+            public string PropertyName;
             public uint Id;
-            public Target(string name, uint id) { Name = name; Id = id; }
+            public bool ResolveReferenceName;
+            public Target(string outputName, string propertyName, uint id, bool resolveReferenceName = false)
+            {
+                OutputName = outputName;
+                PropertyName = propertyName;
+                Id = id;
+                ResolveReferenceName = resolveReferenceName;
+            }
         }
 
         private static readonly Target[] Targets = new Target[]
         {
-            // Identity / profile
-            new Target("UniqueId", 1970170212u),
-            new Target("Name", 1851878757u),
-            new Target("Surname", 843789105u),
-            new Target("Age", 825565216u),
-            new Target("DateOfBirth", 1348759394u),
-            new Target("Height", 825761824u),
-            new Target("Nation", 1315856756u),
-            new Target("NationalityText", 1851880537u),
-            new Target("Nationalities", 1347314028u),
-            new Target("CityOfBirth", 1668245090u),
-            new Target("NationOfBirth", 1349414754u),
-            new Target("Club", 825630752u),
-            new Target("Team", 1415930221u),
-            new Target("Footedness", 1244885353u),
-            new Target("Reputation", 1848658298u),
-            new Target("Personality", 1349742196u),
-            new Target("IsPlayer", 862938733u),
-
-            // Ability / potential
-            new Target("PlayerCurrentAbility", 1346584898u),
-            new Target("PlayerPotentialAbility", 1347436866u),
-
-            // Position / role information
-            new Target("BestPositionMask", 1651526995u),
-            new Target("BestRole", 827549784u),
-            new Target("CompetentPositionsList", 1483174253u),
-            new Target("PositionalAbilities", 1349481281u),
-
-            // Hidden personality / consistency
-            new Target("AttributeAdaptability", 1348559969u),
-            new Target("AttributeAmbition", 1348562274u),
-            new Target("AttributeControversy", 1348695673u),
-            new Target("AttributeLoyalty", 1349283705u),
-            new Target("AttributePressure", 1349546597u),
-            new Target("AttributeProfessionalism", 1349546607u),
-            new Target("AttributeSportsmanship", 1349742703u),
-            new Target("AttributeTemperament", 1349805421u),
-            new Target("Consistency", 1346588494u),
-            new Target("ImportantMatches", 1349086576u),
-            new Target("InjuryProneness", 1349087346u),
-            new Target("Versatility", 1349936498u),
-
-            // Technical / mental / physical / goalkeeper attributes
-            new Target("Acceleration", 892805152u),
-            new Target("AerialReach", 926232624u),
-            new Target("Aggression", 875765792u),
-            new Target("Agility", 892870688u),
-            new Target("Anticipation", 875831328u),
-            new Target("Balance", 892936224u),
-            new Target("Bravery", 875896864u),
-            new Target("CommandOfArea", 909516833u),
-            new Target("Communication", 909582369u),
-            new Target("Composure", 875962400u),
-            new Target("Concentration", 876027936u),
-            new Target("Corners", 842604576u),
-            new Target("Crossing", 858791968u),
-            new Target("Decisions", 876093472u),
-            new Target("Determination", 876159008u),
-            new Target("Dribbling", 858857504u),
-            new Target("Eccentricity", 909647905u),
-            new Target("Finishing", 858923040u),
-            new Target("FirstTouch", 858988576u),
-            new Target("Flair", 892346400u),
-            new Target("FreeKicks", 859054112u),
-            new Target("Handling", 909713441u),
-            new Target("Heading", 859119648u),
-            new Target("JumpingReach", 909123616u),
-            new Target("Kicking", 925900832u),
-            new Target("Leadership", 892411936u),
-            new Target("LongShots", 859185184u),
-            new Target("LongThrows", 859250720u),
-            new Target("Marking", 859316256u),
-            new Target("Movement", 892477472u),
-            new Target("NaturalFitness", 909189152u),
-            new Target("OneOnOnes", 926167088u),
-            new Target("Pace", 909254688u),
-            new Target("Passing", 859381792u),
-            new Target("PenaltyTaking", 875569184u),
-            new Target("Positioning", 892543008u),
-            new Target("Reflexes", 925966369u),
-            new Target("RushingOut", 925970480u),
-            new Target("Stamina", 909320224u),
-            new Target("Strength", 909385760u),
-            new Target("Tackling", 875634720u),
-            new Target("Teamwork", 892608544u),
-            new Target("Technique", 875700256u),
-            new Target("TendencyToPunch", 926036016u),
-            new Target("Throwing", 926101552u),
-            new Target("Vision", 892674080u),
-            new Target("WorkRate", 892739616u)
+            new Target("UniqueId", "UniqueId", 1970170212u),
+            new Target("Name", "Name", 1851878757u),
+            new Target("Surname", "Surname", 843789105u),
+            new Target("ShirtName", "ShirtName", 1482779476u),
+            new Target("Age", "Age", 825565216u),
+            new Target("DateOfBirth", "DateOfBirth", 1348759394u),
+            new Target("Height", "Height", 825761824u),
+            new Target("Gender", "Gender", 1734700644u),
+            new Target("Nationality", "NationalityText", 1851880537u),
+            new Target("Nationalities", "NationalitiesText", 1851880532u),
+            new Target("CityOfBirth", "CityOfBirth", 1668245090u, true),
+            new Target("NationOfBirth", "NationOfBirth", 1349414754u, true),
+            new Target("Club", "Club", 825630752u, true),
+            new Target("Team", "Team", 1415930221u, true),
+            new Target("Footedness", "PlayerFootednessSpeakTo", 1111782216u),
+            new Target("CurrentReputation", "PlayerCurrentReputation", 1146252104u),
+            new Target("HomeReputation", "PlayerHomeReputation", 1346916944u),
+            new Target("WorldReputation", "PlayerWorldReputation", 1347899984u),
+            new Target("Personality", "Personality", 1349742196u),
+            new Target("IsEuNational", "IsEuNational", 1344292181u),
+            new Target("BestPosition", "BestPositionShortString", 1349546835u),
+            new Target("NaturalPosition", "NaturalPositionShortString", 1349546834u),
+            new Target("Positions", "PositionCombinedStringLong", 2019119186u),
+            new Target("CompetentPositions", "CompetentPositionsListLong", 1483174254u),
+            new Target("PlayerCurrentAbility", "PlayerCurrentAbility", 1346584898u),
+            new Target("PlayerPotentialAbility", "PlayerPotentialAbility", 1347436866u)
         };
 
+        private const uint NamePropertyId = 1851878757u;
         private const float WaitSeconds = 0.50f;
+
         private BindingSubsystem _bindings;
         private InteropDataHandler _handler;
         private IDataHandler _handlerInterface;
@@ -146,7 +91,9 @@ namespace FM26FullPlayerProbe
         private Bindings.Key _key;
         private Bindings.Node _node;
         private Bindings.Data _data;
-        private TypedValue _source;
+        private TypedValue _playerSource;
+        private TypedValue _activeSource;
+        private TypedValue _pendingReferenceSource;
         private StringBuilder _log;
         private readonly Dictionary<string, string> _values = new Dictionary<string, string>();
         private int _personIndex;
@@ -155,6 +102,7 @@ namespace FM26FullPlayerProbe
         private bool _waiting;
         private bool _channelOpen;
         private bool _nativeNodeAdded;
+        private bool _resolvingReferenceName;
         private float _checkAt;
 
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
@@ -164,7 +112,7 @@ namespace FM26FullPlayerProbe
             try
             {
                 if (!_waiting && _log == null && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame) StartExport();
-                if (_waiting && Time.unscaledTime >= _checkAt) FinishCurrentTarget();
+                if (_waiting && Time.unscaledTime >= _checkAt) FinishCurrentQuery();
             }
             catch (Exception ex)
             {
@@ -178,9 +126,9 @@ namespace FM26FullPlayerProbe
         {
             _values.Clear();
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.43 SELECTED PLAYER FULL TRUE CSV ===");
-            _log.AppendLine("Exports identity/profile, position, CA, PA, hidden personality and standard attributes from the real backend PersonReference.");
-            _log.AppendLine("Targets=" + Targets.Length + " waitPerTarget=" + WaitSeconds.ToString("0.00") + "s");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.44 PROFILE CLEANUP ===");
+            _log.AppendLine("Tests clean profile strings, textual footedness/reputation fields and nested Name resolution for Nation/City/Club/Team references.");
+            _log.AppendLine("Targets=" + Targets.Length + " waitPerQuery=" + WaitSeconds.ToString("0.00") + "s");
             _log.AppendLine();
 
             var showPerson = FindSelectedShowPerson(_log);
@@ -195,11 +143,10 @@ namespace FM26FullPlayerProbe
                 for (int i = 0; i < objects.Count; i++)
                 {
                     var tv = objects[i];
-                    string type = SafeType(tv);
-                    if (_source == null && type == "FM.UI.PersonReference") _source = tv;
+                    if (_playerSource == null && SafeType(tv) == "FM.UI.PersonReference") _playerSource = tv;
                 }
-                if (_source == null) { _log.AppendLine("RESULT: no PersonReference source"); SaveAndReset(false); return; }
-                var raw = _source.Get();
+                if (_playerSource == null) { _log.AppendLine("RESULT: no PersonReference source"); SaveAndReset(false); return; }
+                var raw = _playerSource.Get();
                 var pr = new PersonReference(raw.Pointer);
                 _personIndex = pr.m_index;
                 _personData1 = pr.Data1;
@@ -218,7 +165,7 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_selected_player_full_true_csv");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_profile_cleanup");
                 _log.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _log.AppendLine("RESULT: created key not present in m_nodes"); SaveAndReset(false); return; }
                 _node = _bindings.m_nodes[_key.m_key];
@@ -238,13 +185,23 @@ namespace FM26FullPlayerProbe
             if (_targetIndex >= Targets.Length)
             {
                 _log.AppendLine();
-                _log.AppendLine("RESULT: all targets completed; writing CSV");
+                _log.AppendLine("RESULT: profile cleanup targets completed; writing CSV");
                 SaveAndReset(true);
                 return;
             }
 
             var t = Targets[_targetIndex];
-            var propId = new PropertyID(t.Id);
+            _resolvingReferenceName = false;
+            _pendingReferenceSource = null;
+            _activeSource = _playerSource;
+            _log.AppendLine();
+            _log.AppendLine("TARGET [" + _targetIndex + "/" + Targets.Length + "] " + t.OutputName + " <= " + t.PropertyName);
+            StartQuery(_activeSource, t.PropertyName, t.Id);
+        }
+
+        private void StartQuery(TypedValue source, string propertyName, uint propertyId)
+        {
+            var propId = new PropertyID(propertyId);
             _node.m_propID = propId;
             _data = _bindings.GetNewData();
             if (_data == null) throw new Exception("GetNewData returned null");
@@ -260,66 +217,100 @@ namespace FM26FullPlayerProbe
             _data.handler = _handlerInterface;
             _data.opener = _key;
 
-            var property = new Bindings.Property(t.Name, propId);
+            var property = new Bindings.Property(propertyName, propId);
             var contexts = new Il2CppSystem.Collections.Generic.List<string>();
-            bool accepts = PersonReference.AcceptsPropertyInternal(t.Id);
-            bool canHandle = _handler.CanHandle(_source, property, contexts);
-            _log.AppendLine("OPEN [" + _targetIndex + "/" + Targets.Length + "] " + t.Name + " accepts=" + accepts + " canHandle=" + canHandle);
-            _handler.OpenChannel(_source, property, _key);
+            bool canHandle = _handler.CanHandle(source, property, contexts);
+            _log.AppendLine("  OPEN property=" + propertyName + " sourceType=" + SafeType(source) + " canHandle=" + canHandle);
+            _handler.OpenChannel(source, property, _key);
             _channelOpen = true;
             _waiting = true;
             _checkAt = Time.unscaledTime + WaitSeconds;
         }
 
-        private void FinishCurrentTarget()
+        private void FinishCurrentQuery()
         {
             _waiting = false;
             var t = Targets[_targetIndex];
+            TypedValue tv = null;
+            bool isSet = false;
+            try
+            {
+                isSet = _data != null && _data.IsSet;
+                tv = _data == null ? null : _data.Value;
+                _log.AppendLine("  RAW isSet=" + isSet + " type=" + SafeType(tv) + " value='" + SafeText(tv) + "'");
+            }
+            catch (Exception ex)
+            {
+                _log.AppendLine("  READ FAIL: " + ex.GetType().Name + " - " + ex.Message);
+            }
+
+            if (_resolvingReferenceName)
+            {
+                string resolved = isSet && tv != null ? CleanUiString(SafeText(tv)) : "";
+                _values[t.OutputName] = resolved;
+                _log.AppendLine("  RESOLVED " + t.OutputName + "='" + resolved + "'");
+                CleanupCurrentGraph();
+                _resolvingReferenceName = false;
+                _pendingReferenceSource = null;
+                _targetIndex++;
+                StartCurrentTarget();
+                return;
+            }
+
+            if (t.ResolveReferenceName && isSet && tv != null && SafeType(tv).EndsWith("Reference"))
+            {
+                _pendingReferenceSource = tv;
+                _log.AppendLine("  REFERENCE detected; resolving nested Name...");
+                CleanupCurrentGraph();
+                _resolvingReferenceName = true;
+                _activeSource = _pendingReferenceSource;
+                try { StartQuery(_activeSource, "Name", NamePropertyId); }
+                catch (Exception ex)
+                {
+                    _log.AppendLine("  NESTED NAME FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                    _values[t.OutputName] = "";
+                    _resolvingReferenceName = false;
+                    _targetIndex++;
+                    StartCurrentTarget();
+                }
+                return;
+            }
+
             string finalValue = "";
             try
             {
-                var tv = _data == null ? null : _data.Value;
-                if (_data == null || !_data.IsSet || tv == null)
-                {
-                    finalValue = "";
-                    _log.AppendLine("  VALUE " + t.Name + "=<unset>");
-                }
+                if (!isSet || tv == null) finalValue = "";
                 else if (SafeType(tv) == "SI.Bindable.DynamicReference")
                 {
                     var dyn = VisualFunctionLibrary.GetDynamicReference(tv);
                     var inner = VisualFunctionLibrary.GetPropertyValue(dyn);
-                    finalValue = SafeText(inner);
-                    _log.AppendLine("  VALUE " + t.Name + "='" + finalValue + "' (unwrapped " + SafeType(inner) + ")");
+                    finalValue = CleanUiString(SafeText(inner));
                 }
-                else
-                {
-                    finalValue = SafeText(tv);
-                    _log.AppendLine("  VALUE " + t.Name + "='" + finalValue + "' (" + SafeType(tv) + ")");
-                }
+                else finalValue = CleanUiString(SafeText(tv));
             }
             catch (Exception ex)
             {
-                _log.AppendLine("  READ FAIL " + t.Name + ": " + ex.GetType().Name + " - " + ex.Message);
+                _log.AppendLine("  VALUE CONVERT FAIL: " + ex.GetType().Name + " - " + ex.Message);
                 finalValue = "";
             }
-            _values[t.Name] = finalValue;
 
+            _values[t.OutputName] = finalValue;
+            _log.AppendLine("  CLEAN " + t.OutputName + "='" + finalValue + "'");
+            CleanupCurrentGraph();
+            _targetIndex++;
+            StartCurrentTarget();
+        }
+
+        private void CleanupCurrentGraph()
+        {
             CloseChannel();
             if (_nativeNodeAdded && _interop != null)
             {
                 try { _interop.RemoveNode(_key); }
-                catch (Exception ex) { _log.AppendLine("native RemoveNode FAIL: " + ex.GetType().Name + " - " + ex.Message); SaveAndReset(false); return; }
+                catch (Exception ex) { try { _log?.AppendLine("  native RemoveNode FAIL: " + ex.GetType().Name + " - " + ex.Message); } catch { } }
                 _nativeNodeAdded = false;
             }
-
             _data = null;
-            _targetIndex++;
-            try { StartCurrentTarget(); }
-            catch (Exception ex)
-            {
-                _log.AppendLine("NEXT TARGET FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                SaveAndReset(false);
-            }
         }
 
         private InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
@@ -358,6 +349,16 @@ namespace FM26FullPlayerProbe
         private static string SafeType(TypedValue tv) { try { return tv == null || tv.DataType == null ? "<null>" : tv.DataType.FullName; } catch { return "<failed>"; } }
         private static string SafeText(TypedValue tv) { try { return tv == null ? "" : (tv.AsString() ?? ""); } catch { return ""; } }
 
+        private static string CleanUiString(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            int marker = s.LastIndexOf('\u0002');
+            if (marker >= 0 && marker + 1 < s.Length) s = s.Substring(marker + 1);
+            var sb = new StringBuilder();
+            for (int i = 0; i < s.Length; i++) if (!char.IsControl(s[i])) sb.Append(s[i]);
+            return sb.ToString().Trim();
+        }
+
         private static VisualElement FindSelectedShowPerson(StringBuilder sb)
         {
             try
@@ -376,6 +377,7 @@ namespace FM26FullPlayerProbe
             catch (Exception ex) { sb.AppendLine("FindSelected FAIL: " + ex.GetType().Name + " - " + ex.Message); }
             return null;
         }
+
         private static VisualElement FindSelectedRecursive(VisualElement ve)
         {
             if (ve == null) return null;
@@ -384,6 +386,7 @@ namespace FM26FullPlayerProbe
             for (int i = 0; i < count; i++) { VisualElement child = null; try { child = ve[i]; } catch { } var found = FindSelectedRecursive(child); if (found != null) return found; }
             return null;
         }
+
         private static VisualElement FindNamedRecursive(VisualElement ve, string name)
         {
             if (ve == null) return null;
@@ -413,14 +416,8 @@ namespace FM26FullPlayerProbe
 
         private void SaveAndReset(bool writeCsv)
         {
-            CloseChannel();
-            if (_nativeNodeAdded && _interop != null)
-            {
-                try { _interop.RemoveNode(_key); } catch { }
-                _nativeNodeAdded = false;
-            }
+            CleanupCurrentGraph();
             _waiting = false;
-
             if (_log != null)
             {
                 try
@@ -428,33 +425,32 @@ namespace FM26FullPlayerProbe
                     string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                     Directory.CreateDirectory(dir);
                     string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
-                    string logFile = Path.Combine(dir, "selectedtrue_" + stamp + ".txt");
+                    string logFile = Path.Combine(dir, "profilecleanup_" + stamp + ".txt");
                     File.WriteAllText(logFile, _log.ToString(), Encoding.UTF8);
                     Plugin.Log.LogInfo("[FM26FullProbe] Saved log: " + logFile);
-
                     if (writeCsv)
                     {
                         var csv = new StringBuilder();
                         csv.Append("PersonIndex,PersonData1");
-                        for (int i = 0; i < Targets.Length; i++) csv.Append("," + Csv(Targets[i].Name));
+                        for (int i = 0; i < Targets.Length; i++) csv.Append("," + Csv(Targets[i].OutputName));
                         csv.AppendLine();
                         csv.Append(_personIndex + "," + _personData1);
                         for (int i = 0; i < Targets.Length; i++)
                         {
-                            string v;
-                            _values.TryGetValue(Targets[i].Name, out v);
+                            string v; _values.TryGetValue(Targets[i].OutputName, out v);
                             csv.Append("," + Csv(v));
                         }
                         csv.AppendLine();
-                        string csvFile = Path.Combine(dir, "selectedtrue_" + stamp + ".csv");
+                        string csvFile = Path.Combine(dir, "profilecleanup_" + stamp + ".csv");
                         File.WriteAllText(csvFile, csv.ToString(), new UTF8Encoding(true));
                         Plugin.Log.LogInfo("[FM26FullProbe] Saved CSV: " + csvFile);
                     }
                 }
                 catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex); }
             }
-
-            _data = null; _node = null; _source = null; _handlerInterface = null; _handler = null; _interop = null; _bindings = null; _log = null;
+            _data = null; _node = null; _playerSource = null; _activeSource = null; _pendingReferenceSource = null;
+            _handlerInterface = null; _handler = null; _interop = null; _bindings = null; _log = null;
+            _resolvingReferenceName = false;
         }
     }
 }
