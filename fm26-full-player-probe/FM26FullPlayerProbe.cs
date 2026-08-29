@@ -16,7 +16,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.44.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.45.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.44 PROFILE CLEANUP - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.45 PROFILE EDGE CLEANUP - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -67,7 +67,8 @@ namespace FM26FullPlayerProbe
             new Target("NationOfBirth", "NationOfBirth", 1349414754u, true),
             new Target("Club", "Club", 825630752u, true),
             new Target("Team", "Team", 1415930221u, true),
-            new Target("Footedness", "PlayerFootednessSpeakTo", 1111782216u),
+            // 0.44 proved PlayerFootednessSpeakTo returns a SpeakToReference. Try resolving its nested Name.
+            new Target("Footedness", "PlayerFootednessSpeakTo", 1111782216u, true),
             new Target("CurrentReputation", "PlayerCurrentReputation", 1146252104u),
             new Target("HomeReputation", "PlayerHomeReputation", 1346916944u),
             new Target("WorldReputation", "PlayerWorldReputation", 1347899984u),
@@ -76,6 +77,7 @@ namespace FM26FullPlayerProbe
             new Target("BestPosition", "BestPositionShortString", 1349546835u),
             new Target("NaturalPosition", "NaturalPositionShortString", 1349546834u),
             new Target("Positions", "PositionCombinedStringLong", 2019119186u),
+            // 0.44 proved this is List<TypedValue>; 0.45 enumerates the list instead of stringifying the type.
             new Target("CompetentPositions", "CompetentPositionsListLong", 1483174254u),
             new Target("PlayerCurrentAbility", "PlayerCurrentAbility", 1346584898u),
             new Target("PlayerPotentialAbility", "PlayerPotentialAbility", 1347436866u)
@@ -126,8 +128,8 @@ namespace FM26FullPlayerProbe
         {
             _values.Clear();
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.44 PROFILE CLEANUP ===");
-            _log.AppendLine("Tests clean profile strings, textual footedness/reputation fields and nested Name resolution for Nation/City/Club/Team references.");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.45 PROFILE EDGE CLEANUP ===");
+            _log.AppendLine("0.44 resolved profile references successfully. This version tests SpeakToReference nested Name and List<TypedValue> enumeration.");
             _log.AppendLine("Targets=" + Targets.Length + " waitPerQuery=" + WaitSeconds.ToString("0.00") + "s");
             _log.AppendLine();
 
@@ -165,7 +167,7 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_profile_cleanup");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_profile_edge_cleanup");
                 _log.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _log.AppendLine("RESULT: created key not present in m_nodes"); SaveAndReset(false); return; }
                 _node = _bindings.m_nodes[_key.m_key];
@@ -185,7 +187,7 @@ namespace FM26FullPlayerProbe
             if (_targetIndex >= Targets.Length)
             {
                 _log.AppendLine();
-                _log.AppendLine("RESULT: profile cleanup targets completed; writing CSV");
+                _log.AppendLine("RESULT: profile edge cleanup targets completed; writing CSV");
                 SaveAndReset(true);
                 return;
             }
@@ -286,6 +288,10 @@ namespace FM26FullPlayerProbe
                     var inner = VisualFunctionLibrary.GetPropertyValue(dyn);
                     finalValue = CleanUiString(SafeText(inner));
                 }
+                else if (SafeType(tv).Contains("System.Collections.Generic.List`1") && SafeType(tv).Contains("SI.Core.TypedValue"))
+                {
+                    finalValue = ReadTypedValueList(tv);
+                }
                 else finalValue = CleanUiString(SafeText(tv));
             }
             catch (Exception ex)
@@ -299,6 +305,33 @@ namespace FM26FullPlayerProbe
             CleanupCurrentGraph();
             _targetIndex++;
             StartCurrentTarget();
+        }
+
+        private string ReadTypedValueList(TypedValue tv)
+        {
+            try
+            {
+                var list = tv.Get<Il2CppSystem.Collections.Generic.List<TypedValue>>();
+                if (list == null) return "";
+                var sb = new StringBuilder();
+                _log.AppendLine("  LIST count=" + list.Count);
+                for (int i = 0; i < list.Count; i++)
+                {
+                    var item = list[i];
+                    string text = CleanUiString(SafeText(item));
+                    string type = SafeType(item);
+                    _log.AppendLine("    ITEM[" + i + "] type=" + type + " value='" + text + "'");
+                    if (string.IsNullOrEmpty(text) || text == type) continue;
+                    if (sb.Length > 0) sb.Append(" | ");
+                    sb.Append(text);
+                }
+                return sb.ToString();
+            }
+            catch (Exception ex)
+            {
+                _log.AppendLine("  LIST READ FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                return "";
+            }
         }
 
         private void CleanupCurrentGraph()
@@ -425,7 +458,7 @@ namespace FM26FullPlayerProbe
                     string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                     Directory.CreateDirectory(dir);
                     string stamp = System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff");
-                    string logFile = Path.Combine(dir, "profilecleanup_" + stamp + ".txt");
+                    string logFile = Path.Combine(dir, "profileedge_" + stamp + ".txt");
                     File.WriteAllText(logFile, _log.ToString(), Encoding.UTF8);
                     Plugin.Log.LogInfo("[FM26FullProbe] Saved log: " + logFile);
                     if (writeCsv)
@@ -441,7 +474,7 @@ namespace FM26FullPlayerProbe
                             csv.Append("," + Csv(v));
                         }
                         csv.AppendLine();
-                        string csvFile = Path.Combine(dir, "profilecleanup_" + stamp + ".csv");
+                        string csvFile = Path.Combine(dir, "profileedge_" + stamp + ".csv");
                         File.WriteAllText(csvFile, csv.ToString(), new UTF8Encoding(true));
                         Plugin.Log.LogInfo("[FM26FullProbe] Saved CSV: " + csvFile);
                     }
