@@ -16,7 +16,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.51.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.52.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.51 FAST MULTI-SELECT FULL TRUE CSV - select player rows and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.52 LEAN+CACHE FAST MULTI-SELECT - select player rows and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -36,7 +36,7 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
-        private enum TargetMode { Normal, ResolveReferenceName, Footedness, TypedValueList }
+        private enum TargetMode { Normal, ResolveReferenceName, Footedness }
 
         private struct Target
         {
@@ -70,7 +70,6 @@ namespace FM26FullPlayerProbe
             new Target("Age", "Age", 825565216u),
             new Target("DateOfBirth", "DateOfBirth", 1348759394u),
             new Target("Height", "Height", 825761824u),
-            new Target("Gender", "Gender", 1734700644u),
             new Target("Nationality", "NationalityText", 1851880537u),
             new Target("Nationalities", "NationalitiesText", 1851880532u),
             new Target("CityOfBirth", "CityOfBirth", 1668245090u, TargetMode.ResolveReferenceName),
@@ -82,12 +81,9 @@ namespace FM26FullPlayerProbe
             new Target("HomeReputation", "PlayerHomeReputation", 1346916944u),
             new Target("WorldReputation", "PlayerWorldReputation", 1347899984u),
             new Target("Personality", "Personality", 1349742196u),
-            new Target("IsPlayer", "IsPlayer", 862938733u),
-            new Target("IsEuNational", "IsEuNational", 1344292181u),
             new Target("BestPosition", "BestPositionShortString", 1349546835u),
             new Target("NaturalPosition", "NaturalPositionShortString", 1349546834u),
             new Target("Positions", "PositionCombinedStringLong", 2019119186u),
-            new Target("CompetentPositions", "CompetentPositionsListLong", 1483174254u, TargetMode.TypedValueList),
 
             new Target("PlayerCurrentAbility", "PlayerCurrentAbility", 1346584898u),
             new Target("PlayerPotentialAbility", "PlayerPotentialAbility", 1347436866u),
@@ -159,6 +155,7 @@ namespace FM26FullPlayerProbe
         private const float QueryTimeoutSeconds = 2.00f;
 
         private readonly List<PlayerRow> _players = new List<PlayerRow>();
+        private readonly Dictionary<string, string> _referenceNameCache = new Dictionary<string, string>();
         private BindingSubsystem _bindings;
         private InteropDataHandler _handler;
         private IDataHandler _handlerInterface;
@@ -174,10 +171,12 @@ namespace FM26FullPlayerProbe
         private bool _channelOpen;
         private bool _nativeNodeAdded;
         private bool _resolvingReferenceName;
+        private string _pendingReferenceCacheKey;
         private float _pollAfter;
         private float _timeoutAt;
         private float _queryStartedAt;
         private int _timeoutCount;
+        private int _cacheHitCount;
 
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
 
@@ -228,10 +227,13 @@ namespace FM26FullPlayerProbe
         private void StartExport()
         {
             _players.Clear();
+            _referenceNameCache.Clear();
             _timeoutCount = 0;
+            _cacheHitCount = 0;
+            _pendingReferenceCacheKey = "";
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.51 FAST MULTI-SELECT FULL TRUE CSV ===");
-            _log.AppendLine("Polls IsSet every frame instead of waiting a fixed 0.50s. Keeps a 2.00s safety timeout per query.");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.52 LEAN+CACHE FAST MULTI-SELECT ===");
+            _log.AppendLine("Based on 0.51 fast polling. Removes optional/redundant Gender, IsPlayer, IsEuNational and CompetentPositions queries, and caches resolved reference names.");
             _log.AppendLine("TargetsPerPlayer=" + Targets.Length + " pollDelay=" + PollDelaySeconds.ToString("0.00") + "s timeout=" + QueryTimeoutSeconds.ToString("0.00") + "s");
             _log.AppendLine();
 
@@ -278,7 +280,7 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_fast_multi_select_full_true_csv");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_lean_cache_fast_multi_select");
                 _log.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _log.AppendLine("RESULT: created key not present in m_nodes"); SaveAndReset(false); return; }
                 _node = _bindings.m_nodes[_key.m_key];
@@ -299,7 +301,7 @@ namespace FM26FullPlayerProbe
             if (_playerIndex >= _players.Count)
             {
                 _log.AppendLine();
-                _log.AppendLine("RESULT: all selected players completed; writing CSV; timeouts=" + _timeoutCount);
+                _log.AppendLine("RESULT: all selected players completed; writing CSV; timeouts=" + _timeoutCount + " cacheHits=" + _cacheHitCount + " cacheEntries=" + _referenceNameCache.Count);
                 SaveAndReset(true);
                 return;
             }
@@ -315,6 +317,7 @@ namespace FM26FullPlayerProbe
 
             var t = Targets[_targetIndex];
             _resolvingReferenceName = false;
+            _pendingReferenceCacheKey = "";
             _activeSource = CurrentPlayer.Source;
             _log.AppendLine("P" + (_playerIndex + 1) + "/" + _players.Count + " T" + (_targetIndex + 1) + "/" + Targets.Length + " " + t.OutputName + " <= " + t.PropertyName);
             StartQuery(_activeSource, t.PropertyName, t.Id);
@@ -367,9 +370,12 @@ namespace FM26FullPlayerProbe
             {
                 string resolved = !timedOut && isSet && tv != null ? CleanUiString(SafeText(tv)) : "";
                 CurrentPlayer.Values[t.OutputName] = resolved;
+                if (!string.IsNullOrEmpty(_pendingReferenceCacheKey) && !string.IsNullOrEmpty(resolved))
+                    _referenceNameCache[_pendingReferenceCacheKey] = resolved;
                 _log.AppendLine("  RESOLVED='" + resolved + "'");
                 CleanupCurrentGraph();
                 _resolvingReferenceName = false;
+                _pendingReferenceCacheKey = "";
                 _targetIndex++;
                 StartCurrentTarget();
                 return;
@@ -377,7 +383,21 @@ namespace FM26FullPlayerProbe
 
             if (!timedOut && t.Mode == TargetMode.ResolveReferenceName && isSet && tv != null && SafeType(tv).EndsWith("Reference"))
             {
+                string cacheKey = GetReferenceCacheKey(tv);
+                string cached;
+                if (!string.IsNullOrEmpty(cacheKey) && _referenceNameCache.TryGetValue(cacheKey, out cached))
+                {
+                    CurrentPlayer.Values[t.OutputName] = cached;
+                    _cacheHitCount++;
+                    _log.AppendLine("  CACHE HIT '" + cached + "'");
+                    CleanupCurrentGraph();
+                    _targetIndex++;
+                    StartCurrentTarget();
+                    return;
+                }
+
                 var nestedSource = tv;
+                _pendingReferenceCacheKey = cacheKey;
                 CleanupCurrentGraph();
                 _resolvingReferenceName = true;
                 _activeSource = nestedSource;
@@ -387,6 +407,7 @@ namespace FM26FullPlayerProbe
                     _log.AppendLine("  NESTED NAME FAIL: " + ex.GetType().Name + " - " + ex.Message);
                     CurrentPlayer.Values[t.OutputName] = "";
                     _resolvingReferenceName = false;
+                    _pendingReferenceCacheKey = "";
                     _targetIndex++;
                     StartCurrentTarget();
                 }
@@ -398,7 +419,6 @@ namespace FM26FullPlayerProbe
             {
                 if (timedOut || !isSet || tv == null) finalValue = "";
                 else if (t.Mode == TargetMode.Footedness) finalValue = ParsePreferredFoot(tv);
-                else if (t.Mode == TargetMode.TypedValueList) finalValue = ReadTypedValueList(tv);
                 else if (SafeType(tv) == "SI.Bindable.DynamicReference")
                 {
                     var dyn = VisualFunctionLibrary.GetDynamicReference(tv);
@@ -420,6 +440,18 @@ namespace FM26FullPlayerProbe
             StartCurrentTarget();
         }
 
+        private static string GetReferenceCacheKey(TypedValue tv)
+        {
+            try
+            {
+                if (tv == null) return "";
+                var raw = tv.Get();
+                if (raw == null) return "";
+                return SafeType(tv) + ":" + raw.Pointer.ToString("X");
+            }
+            catch { return ""; }
+        }
+
         private string ParsePreferredFoot(TypedValue tv)
         {
             if (SafeType(tv) != "SI.Bindable.DynamicReference") return CleanUiString(SafeText(tv));
@@ -438,37 +470,6 @@ namespace FM26FullPlayerProbe
                 }
             }
             return preferred;
-        }
-
-        private string ReadTypedValueList(TypedValue tv)
-        {
-            try
-            {
-                var list = tv.Get<Il2CppSystem.Collections.Generic.List<TypedValue>>();
-                if (list == null) return "";
-                var sb = new StringBuilder();
-                for (int i = 0; i < list.Count; i++)
-                {
-                    var item = list[i];
-                    string value = CleanUiString(SafeText(item));
-                    string type = SafeType(item);
-                    if (type == "SI.Bindable.DynamicReference")
-                    {
-                        try
-                        {
-                            var dyn = VisualFunctionLibrary.GetDynamicReference(item);
-                            var inner = VisualFunctionLibrary.GetPropertyValue(dyn);
-                            value = CleanUiString(SafeText(inner));
-                        }
-                        catch { value = ""; }
-                    }
-                    if (string.IsNullOrEmpty(value) || value == type) continue;
-                    if (sb.Length > 0) sb.Append(" | ");
-                    sb.Append(value);
-                }
-                return sb.ToString();
-            }
-            catch { return ""; }
         }
 
         private void CleanupCurrentGraph()
@@ -626,7 +627,7 @@ namespace FM26FullPlayerProbe
 
             _data = null; _node = null; _activeSource = null;
             _handlerInterface = null; _handler = null; _interop = null; _bindings = null; _log = null;
-            _players.Clear(); _resolvingReferenceName = false;
+            _players.Clear(); _referenceNameCache.Clear(); _resolvingReferenceName = false; _pendingReferenceCacheKey = "";
         }
     }
 }
