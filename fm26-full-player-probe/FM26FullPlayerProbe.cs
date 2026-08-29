@@ -14,7 +14,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.35.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.35.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -23,7 +23,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.35 NATIVE INTEROP GRAPH - select one player and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.35.1 NATIVE GRAPH PARTIAL - select one player and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -41,6 +41,7 @@ namespace FM26FullPlayerProbe
 
         private BindingSubsystem _bindings;
         private InteropDataHandler _handler;
+        private IDataHandler _handlerInterface;
         private Bindings.Key _key;
         private Bindings.Node _node;
         private Bindings.Data _data;
@@ -72,9 +73,9 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.35 NATIVE INTEROP GRAPH ===");
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.35.1 NATIVE GRAPH PARTIAL ===");
             _sb.AppendLine("0.34.1 proved a real Bindings.Data can be allocated and attached to the synthetic node, but direct InteropDataHandler.OpenChannel still leaves Data.handler/opener empty and produces no value.");
-            _sb.AppendLine("This probe mirrors the missing native graph registration before opening the handler channel: GameInteropSubsystem.AddNode + AddData + SetTarget, and it fills Data.handler/opener like Bindings.TryOpenChannel would.");
+            _sb.AppendLine("The build wrapper does not expose the runtime 3-argument AddNode overload, so this probe tests the remaining native graph pieces AddData + SetTarget and uses the original IDataHandler registry wrapper for Data.handler ownership.");
             _sb.AppendLine("Property tested: Name=" + NameProperty);
             _sb.AppendLine();
 
@@ -135,16 +136,16 @@ namespace FM26FullPlayerProbe
             }
 
             _handler = FindLiveInteropHandler(_sb, _bindings);
-            if (_handler == null || _handler.m_interop == null)
+            if (_handler == null || _handler.m_interop == null || _handlerInterface == null)
             {
-                _sb.AppendLine("RESULT: InteropDataHandler/GameInteropSubsystem NOT FOUND");
+                _sb.AppendLine("RESULT: InteropDataHandler/GameInteropSubsystem/IDataHandler NOT FOUND");
                 SaveAndReset();
                 return;
             }
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_native_graph_name");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_native_graph_partial_name");
                 _sb.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
 
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key))
@@ -178,14 +179,15 @@ namespace FM26FullPlayerProbe
                 _sb.AppendLine("NODE attached: parentKey=" + parentKey.m_key + " dataKeyRaw=" + dataKey.m_key + " dataKeyValid=" + dataKey.IsValid() + " propID=" + SafePropertyId(_node.m_propID));
                 _sb.AppendLine("DATA before graph: keyRaw=" + _data.key.m_key + " isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
 
-                // Mirror the native graph bookkeeping that InteropDataHandler normally observes from BindingTree changes.
-                _handler.m_interop.AddNode(_key, parentKey, _node.m_propID);
+                // The build-time FM.GamePlugin wrapper lacks the live runtime AddNode(Key,Key,PropertyID) overload.
+                // Test the two graph operations that are exposed by both wrappers.
                 _handler.m_interop.AddData(dataKey);
                 _handler.m_interop.SetTarget(_key, dataKey);
-                _sb.AppendLine("NATIVE GRAPH registered: AddNode + AddData + SetTarget OK");
+                _sb.AppendLine("NATIVE GRAPH registered: AddData + SetTarget OK (AddNode skipped: wrapper mismatch)");
 
-                // Mirror the Data ownership normally assigned by Bindings.TryOpenChannel.
-                _data.handler = _handler;
+                // Use the actual IDataHandler object from BindingSubsystem.m_handlers instead of trying
+                // to implicitly convert the concrete InteropDataHandler wrapper.
+                _data.handler = _handlerInterface;
                 _data.opener = _key;
                 _sb.AppendLine("DATA after ownership: isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handlerPtr=" + SafeHandlerPointer(_data) + " opener=" + _data.opener.m_key);
 
@@ -262,7 +264,7 @@ namespace FM26FullPlayerProbe
             SaveAndReset();
         }
 
-        private static InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
+        private InteropDataHandler FindLiveInteropHandler(StringBuilder sb, BindingSubsystem bindings)
         {
             try
             {
@@ -285,7 +287,8 @@ namespace FM26FullPlayerProbe
                             var concrete = new InteropDataHandler(h.Pointer);
                             if (concrete.m_interop != null)
                             {
-                                sb.AppendLine("InteropDataHandler ptr=0x" + concrete.Pointer.ToString("X") + " interop=0x" + concrete.m_interop.Pointer.ToString("X"));
+                                _handlerInterface = h;
+                                sb.AppendLine("InteropDataHandler ptr=0x" + concrete.Pointer.ToString("X") + " interop=0x" + concrete.m_interop.Pointer.ToString("X") + " IDataHandler ptr=0x" + h.Pointer.ToString("X"));
                                 return concrete;
                             }
                         }
@@ -426,6 +429,7 @@ namespace FM26FullPlayerProbe
             _data = null;
             _node = null;
             _source = null;
+            _handlerInterface = null;
             _handler = null;
             _bindings = null;
             _sb = null;
@@ -449,7 +453,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "nativegraph_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "nativegraphpartial_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
