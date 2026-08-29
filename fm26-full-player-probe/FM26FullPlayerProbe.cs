@@ -16,7 +16,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.42.1")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.43.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -24,7 +24,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.42.1 SELECTED PLAYER TRUE CSV - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.43 SELECTED PLAYER FULL TRUE CSV - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
         public override bool Unload()
@@ -45,9 +45,36 @@ namespace FM26FullPlayerProbe
 
         private static readonly Target[] Targets = new Target[]
         {
+            // Identity / profile
+            new Target("UniqueId", 1970170212u),
+            new Target("Name", 1851878757u),
+            new Target("Surname", 843789105u),
+            new Target("Age", 825565216u),
+            new Target("DateOfBirth", 1348759394u),
+            new Target("Height", 825761824u),
+            new Target("Nation", 1315856756u),
+            new Target("NationalityText", 1851880537u),
+            new Target("Nationalities", 1347314028u),
+            new Target("CityOfBirth", 1668245090u),
+            new Target("NationOfBirth", 1349414754u),
+            new Target("Club", 825630752u),
+            new Target("Team", 1415930221u),
+            new Target("Footedness", 1244885353u),
+            new Target("Reputation", 1848658298u),
+            new Target("Personality", 1349742196u),
+            new Target("IsPlayer", 862938733u),
+
+            // Ability / potential
             new Target("PlayerCurrentAbility", 1346584898u),
             new Target("PlayerPotentialAbility", 1347436866u),
 
+            // Position / role information
+            new Target("BestPositionMask", 1651526995u),
+            new Target("BestRole", 827549784u),
+            new Target("CompetentPositionsList", 1483174253u),
+            new Target("PositionalAbilities", 1349481281u),
+
+            // Hidden personality / consistency
             new Target("AttributeAdaptability", 1348559969u),
             new Target("AttributeAmbition", 1348562274u),
             new Target("AttributeControversy", 1348695673u),
@@ -61,6 +88,7 @@ namespace FM26FullPlayerProbe
             new Target("InjuryProneness", 1349087346u),
             new Target("Versatility", 1349936498u),
 
+            // Technical / mental / physical / goalkeeper attributes
             new Target("Acceleration", 892805152u),
             new Target("AerialReach", 926232624u),
             new Target("Aggression", 875765792u),
@@ -150,8 +178,8 @@ namespace FM26FullPlayerProbe
         {
             _values.Clear();
             _log = new StringBuilder();
-            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.42.1 SELECTED PLAYER TRUE CSV ===");
-            _log.AppendLine("Exports CA, PA, hidden personality attributes and all standard player attributes from the real backend PersonReference.");
+            _log.AppendLine("=== FM26 FULL PLAYER PROBE 0.43 SELECTED PLAYER FULL TRUE CSV ===");
+            _log.AppendLine("Exports identity/profile, position, CA, PA, hidden personality and standard attributes from the real backend PersonReference.");
             _log.AppendLine("Targets=" + Targets.Length + " waitPerTarget=" + WaitSeconds.ToString("0.00") + "s");
             _log.AppendLine();
 
@@ -190,7 +218,7 @@ namespace FM26FullPlayerProbe
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_selected_player_true_csv");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_selected_player_full_true_csv");
                 _log.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
                 if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _log.AppendLine("RESULT: created key not present in m_nodes"); SaveAndReset(false); return; }
                 _node = _bindings.m_nodes[_key.m_key];
