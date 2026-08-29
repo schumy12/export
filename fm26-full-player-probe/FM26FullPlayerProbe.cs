@@ -13,7 +13,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.28.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.28.1")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -22,7 +22,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.28 VALID REGISTERED NODES - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.28.1 VALID REGISTERED NODES - press F8 after loading a save.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -72,7 +72,7 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.28 VALID REGISTERED NODES ===");
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.28.1 VALID REGISTERED NODES ===");
             _sb.AppendLine("Creates real temporary Bindings nodes before asking the live InteropDataHandler for UniqueId.");
             _sb.AppendLine("No managed backend callback, no Harmony, no UI traversal, no m_bindingTree getter.");
             _sb.AppendLine("Property UniqueId=" + UniqueIdProperty);
@@ -110,7 +110,7 @@ namespace FM26FullPlayerProbe
 
             var property = new Bindings.Property("UniqueId", new PropertyID(UniqueIdProperty));
             int opened = 0;
-            string runTag = DateTime.Now.ToString("HHmmssfff");
+            string runTag = System.DateTime.Now.ToString("HHmmssfff");
 
             for (int index = 0; index < ProbeCount; index++)
             {
@@ -136,7 +136,7 @@ namespace FM26FullPlayerProbe
                     string channelName = "<none>";
                     try
                     {
-                        ulong rawKey = key;
+                        ulong rawKey = key.m_key;
                         if (_handler.m_channels != null && _handler.m_channels.ContainsKey(rawKey))
                             channelName = _handler.m_channels[rawKey] ?? "<null>";
                     }
@@ -314,7 +314,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "validnode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "validnode_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
