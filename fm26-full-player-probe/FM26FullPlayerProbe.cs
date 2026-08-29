@@ -15,19 +15,17 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.38.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.39.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
         private static ProbeBehaviour _behaviour;
-
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.38 TRUE CA PROBE - select one player row and press F8 once.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.39 TRUE PA PROBE - select one player row and press F8 once.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
-
         public override bool Unload()
         {
             if (_behaviour != null) UnityEngine.Object.Destroy(_behaviour);
@@ -37,8 +35,8 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
-        private const uint TargetProperty = 1346584898u; // PlayerCurrentAbility
-        private const string TargetName = "PlayerCurrentAbility";
+        private const uint TargetProperty = 1347436866u; // PlayerPotentialAbility
+        private const string TargetName = "PlayerPotentialAbility";
         private const float WaitSeconds = 2.0f;
 
         private BindingSubsystem _bindings;
@@ -60,10 +58,8 @@ namespace FM26FullPlayerProbe
         {
             try
             {
-                if (!_waiting && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
-                    StartProbe();
-                if (_waiting && Time.unscaledTime >= _checkAt)
-                    FinishProbe();
+                if (!_waiting && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame) StartProbe();
+                if (_waiting && Time.unscaledTime >= _checkAt) FinishProbe();
             }
             catch (Exception ex)
             {
@@ -76,35 +72,20 @@ namespace FM26FullPlayerProbe
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.38 TRUE CURRENT ABILITY ===");
-            _sb.AppendLine("0.37.1 proved the full native graph works: AddNode + AddData + SetTarget + Data ownership + InteropDataHandler.OpenChannel produced a real value.");
-            _sb.AppendLine("This probe changes only the property from Name to the internal PlayerCurrentAbility value.");
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.39 TRUE POTENTIAL ABILITY ===");
+            _sb.AppendLine("0.38 returned PlayerCurrentAbility as a real backend DynamicNumber. This probe changes only the property to PlayerPotentialAbility.");
             _sb.AppendLine("Property=" + TargetName + " id=" + TargetProperty);
             _sb.AppendLine();
 
             var showPerson = FindSelectedShowPerson(_sb);
-            if (showPerson == null)
-            {
-                _sb.AppendLine("RESULT: selected ShowPerson NOT FOUND");
-                SaveAndReset();
-                return;
-            }
+            if (showPerson == null) { _sb.AppendLine("RESULT: selected ShowPerson NOT FOUND"); SaveAndReset(); return; }
 
             try
             {
-                BindingPath path;
-                ActionGroupings groupings;
-                bool multiple;
+                BindingPath path; ActionGroupings groupings; bool multiple;
                 var objects = PluginContextMenuContributor.GetContextMenuObjects(showPerson, out path, out groupings, out multiple);
                 _sb.AppendLine("GetContextMenuObjects count=" + (objects == null ? -1 : objects.Count) + " multiple=" + multiple);
-                if (objects == null || objects.Count == 0)
-                {
-                    _sb.AppendLine("RESULT: no context objects");
-                    SaveAndReset();
-                    return;
-                }
-
-                _source = null;
+                if (objects == null || objects.Count == 0) { _sb.AppendLine("RESULT: no context objects"); SaveAndReset(); return; }
                 for (int i = 0; i < objects.Count; i++)
                 {
                     var tv = objects[i];
@@ -112,14 +93,7 @@ namespace FM26FullPlayerProbe
                     _sb.AppendLine("OBJ[" + i + "] type=" + type + " text='" + SafeText(tv) + "'");
                     if (_source == null && type == "FM.UI.PersonReference") _source = tv;
                 }
-
-                if (_source == null)
-                {
-                    _sb.AppendLine("RESULT: no PersonReference source");
-                    SaveAndReset();
-                    return;
-                }
-
+                if (_source == null) { _sb.AppendLine("RESULT: no PersonReference source"); SaveAndReset(); return; }
                 var raw = _source.Get();
                 var pr = new PersonReference(raw.Pointer);
                 _sb.AppendLine("REAL PERSON Data1=" + pr.Data1 + " m_index=" + pr.m_index + " combined=" + pr.CombinedIndexAndType + " type=" + pr.Type);
@@ -127,89 +101,47 @@ namespace FM26FullPlayerProbe
             catch (Exception ex)
             {
                 _sb.AppendLine("context/source FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                SaveAndReset();
-                return;
+                SaveAndReset(); return;
             }
 
             _bindings = EmbeddedDataHandler.s_bindingSubsystem;
-            if (_bindings == null)
-            {
-                _sb.AppendLine("RESULT: BindingSubsystem NOT FOUND");
-                SaveAndReset();
-                return;
-            }
-
+            if (_bindings == null) { _sb.AppendLine("RESULT: BindingSubsystem NOT FOUND"); SaveAndReset(); return; }
             _handler = FindLiveInteropHandler(_sb, _bindings);
-            if (_handler == null || _handlerInterface == null || _interop == null)
-            {
-                _sb.AppendLine("RESULT: Interop handler/subsystem NOT FOUND");
-                SaveAndReset();
-                return;
-            }
+            if (_handler == null || _handlerInterface == null || _interop == null) { _sb.AppendLine("RESULT: Interop handler/subsystem NOT FOUND"); SaveAndReset(); return; }
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_true_ca");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_true_pa");
                 _sb.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
-
-                if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key))
-                {
-                    _sb.AppendLine("RESULT: created key not present in m_nodes");
-                    SaveAndReset();
-                    return;
-                }
-
+                if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key)) { _sb.AppendLine("RESULT: created key not present in m_nodes"); SaveAndReset(); return; }
                 _node = _bindings.m_nodes[_key.m_key];
-                if (_node == null)
-                {
-                    _sb.AppendLine("RESULT: m_nodes entry is null");
-                    SaveAndReset();
-                    return;
-                }
+                if (_node == null) { _sb.AppendLine("RESULT: m_nodes entry is null"); SaveAndReset(); return; }
 
                 var propId = new PropertyID(TargetProperty);
                 _node.m_propID = propId;
                 _data = _bindings.GetNewData();
-                if (_data == null)
-                {
-                    _sb.AppendLine("RESULT: GetNewData returned null");
-                    SaveAndReset();
-                    return;
-                }
-
+                if (_data == null) { _sb.AppendLine("RESULT: GetNewData returned null"); SaveAndReset(); return; }
                 _bindings.SetTargetData(_data, _node);
                 var dataKey = _node.m_dataKey;
                 var parentKey = _node.m_parent == null ? default(Bindings.Key) : _node.m_parent.m_key;
                 _sb.AppendLine("NODE attached: parentKey=" + parentKey.m_key + " dataKeyRaw=" + dataKey.m_key + " dataKeyValid=" + dataKey.IsValid() + " propID=" + SafePropertyId(propId));
 
-                try
-                {
-                    dynamic runtimeInterop = _interop;
-                    runtimeInterop.AddNode(_key, parentKey, propId);
-                    _sb.AppendLine("AddNode runtime-dispatch OK");
-                }
-                catch (Exception ex)
-                {
-                    _sb.AppendLine("AddNode runtime-dispatch FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                    SaveAndReset();
-                    return;
-                }
-
+                dynamic runtimeInterop = _interop;
+                runtimeInterop.AddNode(_key, parentKey, propId);
+                _sb.AppendLine("AddNode runtime-dispatch OK");
                 _interop.AddData(dataKey);
                 _interop.SetTarget(_key, dataKey);
                 _data.handler = _handlerInterface;
                 _data.opener = _key;
-                _sb.AppendLine("GRAPH ready: AddData + SetTarget + ownership OK; hasOpenChannel=" + _data.HasOpenChannel);
+                _sb.AppendLine("GRAPH ready: hasOpenChannel=" + _data.HasOpenChannel);
 
                 var property = new Bindings.Property(TargetName, propId);
                 var contexts = new Il2CppSystem.Collections.Generic.List<string>();
                 _sb.AppendLine("schemaAccepts=" + PersonReference.AcceptsPropertyInternal(TargetProperty) + " canHandle=" + _handler.CanHandle(_source, property, contexts));
                 _sb.AppendLine("handler channels before=" + SafeChannelCount(_handler));
                 _sb.AppendLine("interop batchedRequests before=" + SafeBatchCount(_handler));
-
                 _handler.OpenChannel(_source, property, _key);
                 _channelOpen = true;
-
                 _sb.AppendLine("channel='" + SafeChannelName(_handler, _key) + "'");
                 _sb.AppendLine("handler channels immediatelyAfterOpen=" + SafeChannelCount(_handler));
                 _sb.AppendLine("interop batchedRequests immediatelyAfterOpen=" + SafeBatchCount(_handler));
@@ -260,7 +192,6 @@ namespace FM26FullPlayerProbe
                 _sb.AppendLine("READBACK FAIL: " + ex.GetType().Name + " - " + ex.Message);
                 _sb.AppendLine(ex.ToString());
             }
-
             CloseChannel();
             _sb.AppendLine("handler channels after close=" + SafeChannelCount(_handler));
             _sb.AppendLine("interop batchedRequests after close=" + SafeBatchCount(_handler));
@@ -277,15 +208,12 @@ namespace FM26FullPlayerProbe
                 sb.AppendLine("handler registry count=" + registry.Count);
                 foreach (var pair in registry)
                 {
-                    string n = "";
-                    try { n = pair.Key == null ? "" : pair.Key.FullName; } catch { }
+                    string n = ""; try { n = pair.Key == null ? "" : pair.Key.FullName; } catch { }
                     if (n == null || !n.Contains("InteropReference")) continue;
-                    var list = pair.Value;
-                    if (list == null) continue;
+                    var list = pair.Value; if (list == null) continue;
                     for (int i = 0; i < list.Count; i++)
                     {
-                        var h = list[i];
-                        if (h == null) continue;
+                        var h = list[i]; if (h == null) continue;
                         try
                         {
                             var concrete = new InteropDataHandler(h.Pointer);
@@ -305,40 +233,13 @@ namespace FM26FullPlayerProbe
             return null;
         }
 
-        private static int SafeBatchCount(InteropDataHandler handler)
-        {
-            try { return handler == null || handler.m_interop == null || handler.m_interop.m_batchedRequests == null ? -1 : handler.m_interop.m_batchedRequests.Count; }
-            catch { return -2; }
-        }
-
-        private static int SafeChannelCount(InteropDataHandler handler)
-        {
-            try { return handler == null || handler.m_channels == null ? -1 : handler.m_channels.Count; }
-            catch { return -2; }
-        }
-
-        private static string SafeChannelName(InteropDataHandler handler, Bindings.Key key)
-        {
-            try
-            {
-                if (handler != null && handler.m_channels != null && handler.m_channels.ContainsKey(key.m_key))
-                    return handler.m_channels[key.m_key] ?? "<null>";
-            }
-            catch { }
-            return "<none>";
-        }
-
-        private static string SafeHandlerPointer(Bindings.Data data)
-        {
-            try { return data == null || data.handler == null ? "<null>" : "0x" + data.handler.Pointer.ToString("X"); }
-            catch { return "<failed>"; }
-        }
-
-        private static string SafePropertyId(PropertyID id)
-        {
-            try { return id.ToString(); }
-            catch { return "<failed>"; }
-        }
+        private static int SafeBatchCount(InteropDataHandler h) { try { return h == null || h.m_interop == null || h.m_interop.m_batchedRequests == null ? -1 : h.m_interop.m_batchedRequests.Count; } catch { return -2; } }
+        private static int SafeChannelCount(InteropDataHandler h) { try { return h == null || h.m_channels == null ? -1 : h.m_channels.Count; } catch { return -2; } }
+        private static string SafeChannelName(InteropDataHandler h, Bindings.Key k) { try { if (h != null && h.m_channels != null && h.m_channels.ContainsKey(k.m_key)) return h.m_channels[k.m_key] ?? "<null>"; } catch { } return "<none>"; }
+        private static string SafeHandlerPointer(Bindings.Data d) { try { return d == null || d.handler == null ? "<null>" : "0x" + d.handler.Pointer.ToString("X"); } catch { return "<failed>"; } }
+        private static string SafePropertyId(PropertyID id) { try { return id.ToString(); } catch { return "<failed>"; } }
+        private static string SafeType(TypedValue tv) { try { return tv == null || tv.DataType == null ? "<null>" : tv.DataType.FullName; } catch { return "<failed>"; } }
+        private static string SafeText(TypedValue tv) { try { return tv == null ? "<null>" : (tv.AsString() ?? ""); } catch (Exception ex) { return "<" + ex.GetType().Name + ">"; } }
 
         private static VisualElement FindSelectedShowPerson(StringBuilder sb)
         {
@@ -349,113 +250,54 @@ namespace FM26FullPlayerProbe
                 if (docs == null) return null;
                 for (int i = 0; i < docs.Length; i++)
                 {
-                    var doc = docs[i];
-                    if (doc == null) continue;
-                    VisualElement root = null;
-                    try { root = doc.rootVisualElement; } catch { }
+                    var doc = docs[i]; if (doc == null) continue;
+                    VisualElement root = null; try { root = doc.rootVisualElement; } catch { }
                     var found = FindSelectedRecursive(root);
-                    if (found != null)
-                    {
-                        sb.AppendLine("selected element found in UIDocument[" + i + "]");
-                        return found;
-                    }
+                    if (found != null) { sb.AppendLine("selected element found in UIDocument[" + i + "]"); return found; }
                 }
             }
             catch (Exception ex) { sb.AppendLine("FindSelected FAIL: " + ex.GetType().Name + " - " + ex.Message); }
             return null;
         }
-
         private static VisualElement FindSelectedRecursive(VisualElement ve)
         {
             if (ve == null) return null;
-            try
-            {
-                if (ve.ClassListContains("virtualised-list__item--selected"))
-                {
-                    var show = FindNamedRecursive(ve, "ShowPerson");
-                    if (show != null) return show;
-                }
-            }
-            catch { }
-            int count = 0;
-            try { count = ve.childCount; } catch { }
-            for (int i = 0; i < count; i++)
-            {
-                VisualElement child = null;
-                try { child = ve[i]; } catch { }
-                var found = FindSelectedRecursive(child);
-                if (found != null) return found;
-            }
+            try { if (ve.ClassListContains("virtualised-list__item--selected")) { var show = FindNamedRecursive(ve, "ShowPerson"); if (show != null) return show; } } catch { }
+            int count = 0; try { count = ve.childCount; } catch { }
+            for (int i = 0; i < count; i++) { VisualElement child = null; try { child = ve[i]; } catch { } var found = FindSelectedRecursive(child); if (found != null) return found; }
             return null;
         }
-
         private static VisualElement FindNamedRecursive(VisualElement ve, string name)
         {
             if (ve == null) return null;
             try { if (ve.name == name) return ve; } catch { }
-            int count = 0;
-            try { count = ve.childCount; } catch { }
-            for (int i = 0; i < count; i++)
-            {
-                VisualElement child = null;
-                try { child = ve[i]; } catch { }
-                var found = FindNamedRecursive(child, name);
-                if (found != null) return found;
-            }
+            int count = 0; try { count = ve.childCount; } catch { }
+            for (int i = 0; i < count; i++) { VisualElement child = null; try { child = ve[i]; } catch { } var found = FindNamedRecursive(child, name); if (found != null) return found; }
             return null;
         }
 
         private static unsafe Bindings.Key CreateTemporaryNode(BindingSubsystem bindings, string name)
         {
-            fixed (char* p = name)
-            {
-                var span = new Il2CppSystem.ReadOnlySpan<char>((void*)p, name.Length);
-                return bindings.Create(ref span, Bindings.NodeFlags.Temporary);
-            }
+            fixed (char* p = name) { var span = new Il2CppSystem.ReadOnlySpan<char>((void*)p, name.Length); return bindings.Create(ref span, Bindings.NodeFlags.Temporary); }
         }
-
         private void CloseChannel()
         {
             if (!_channelOpen || _handler == null) return;
-            try { _handler.CloseChannel(_key); }
-            catch (Exception ex) { try { _sb?.AppendLine("CLOSE FAIL: " + ex.GetType().Name + " - " + ex.Message); } catch { } }
+            try { _handler.CloseChannel(_key); } catch (Exception ex) { try { _sb?.AppendLine("CLOSE FAIL: " + ex.GetType().Name + " - " + ex.Message); } catch { } }
             _channelOpen = false;
         }
-
         private void SaveAndReset()
         {
-            CloseChannel();
-            _waiting = false;
-            if (_sb != null) Save(_sb);
-            _data = null;
-            _node = null;
-            _source = null;
-            _handlerInterface = null;
-            _handler = null;
-            _interop = null;
-            _bindings = null;
-            _sb = null;
+            CloseChannel(); _waiting = false; if (_sb != null) Save(_sb);
+            _data = null; _node = null; _source = null; _handlerInterface = null; _handler = null; _interop = null; _bindings = null; _sb = null;
         }
-
-        private static string SafeType(TypedValue tv)
-        {
-            try { return tv == null || tv.DataType == null ? "<null>" : tv.DataType.FullName; }
-            catch { return "<failed>"; }
-        }
-
-        private static string SafeText(TypedValue tv)
-        {
-            try { return tv == null ? "<null>" : (tv.AsString() ?? ""); }
-            catch (Exception ex) { return "<" + ex.GetType().Name + ">"; }
-        }
-
         private static void Save(StringBuilder sb)
         {
             try
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "trueca_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "truepa_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
