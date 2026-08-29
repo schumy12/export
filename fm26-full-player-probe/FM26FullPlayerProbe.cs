@@ -1,16 +1,19 @@
 using System;
 using System.IO;
 using System.Text;
-using System.Reflection;
 using BepInEx;
 using BepInEx.Unity.IL2CPP;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.UIElements;
+using FM.UI;
+using SI.Core;
 using SI.Bindable;
+using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.33.0")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.34.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -19,7 +22,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.33 BINDING DATA PLUMBING METADATA - press F8 after loading a save.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.34 BINDINGS-OWNED OPENREQUEST - select one player and press F8.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -32,132 +35,327 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
+        private const uint NameProperty = 1851878757u;
+        private const float WaitSeconds = 2.0f;
+
+        private BindingSubsystem _bindings;
+        private Bindings.Key _key;
+        private Bindings.Node _node;
+        private Bindings.Data _data;
+        private TypedValue _source;
+        private StringBuilder _sb;
+        private bool _waiting;
+        private float _checkAt;
+
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
 
         private void Update()
         {
             try
             {
-                if (Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
-                    RunProbe();
+                if (!_waiting && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
+                    StartProbe();
+                if (_waiting && Time.unscaledTime >= _checkAt)
+                    FinishProbe();
             }
             catch (Exception ex)
             {
                 Plugin.Log.LogError("[FM26FullProbe] Update error: " + ex);
+                try { _sb?.AppendLine("UPDATE/FATAL: " + ex); } catch { }
+                SaveAndReset();
             }
         }
 
-        private void RunProbe()
+        private void StartProbe()
         {
-            var sb = new StringBuilder();
-            sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.33 BINDING DATA PLUMBING METADATA ===");
-            sb.AppendLine("0.32.1 proved InteropDataHandler.OpenChannel queues a backend request and the queue is consumed, but direct handler.OpenChannel does not attach returned data to our synthetic Bindings node.");
-            sb.AppendLine("Goal: map the exact Bindings Node/Data/DataKey/OpenRequest plumbing needed to let BindingSubsystem own the channel lifecycle.");
-            sb.AppendLine("Metadata reflection only; no generated FM/SI property getters are invoked through reflection.");
-            sb.AppendLine();
+            _sb = new StringBuilder();
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.34 BINDINGS-OWNED OPENREQUEST ===");
+            _sb.AppendLine("0.32.1 proved direct InteropDataHandler.OpenChannel reaches and is consumed by the native backend, but the synthetic node is never attached to returned data.");
+            _sb.AppendLine("0.33 mapped Node -> DataKey -> OpenRequest and BindingSubsystem.TryOpenChannel.");
+            _sb.AppendLine("This probe lets BindingSubsystem own the Data entry and channel lifecycle.");
+            _sb.AppendLine("Property tested: Name=" + NameProperty);
+            _sb.AppendLine();
 
-            DumpType(sb, typeof(Bindings));
-            DumpType(sb, typeof(Bindings.Node));
-            DumpType(sb, typeof(Bindings.Data));
-            DumpType(sb, typeof(Bindings.DataKey));
-            DumpType(sb, typeof(Bindings.OpenRequest));
-            DumpType(sb, typeof(IReadOnlyNode));
-            DumpType(sb, typeof(IReadOnlyData));
-            DumpType(sb, typeof(BindingSubsystem));
-
-            sb.AppendLine();
-            sb.AppendLine("=== METHODS CONTAINING OPEN / DATA / TARGET / NODE ===");
-            DumpFilteredMethods(sb, typeof(Bindings));
-            DumpFilteredMethods(sb, typeof(BindingSubsystem));
-            DumpFilteredMethods(sb, typeof(Bindings.Node));
-            DumpFilteredMethods(sb, typeof(Bindings.Data));
-
-            Save(sb);
-        }
-
-        private static void DumpType(StringBuilder sb, Type t)
-        {
-            sb.AppendLine("TYPE " + t.FullName);
-            sb.AppendLine("  Assembly=" + t.Assembly.GetName().Name);
-            sb.AppendLine("  BaseType=" + (t.BaseType == null ? "<null>" : t.BaseType.FullName));
-
-            var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
-
-            foreach (var p in t.GetProperties(flags))
-                sb.AppendLine("  PROP " + p.Name + " : " + TypeName(p.PropertyType));
-
-            foreach (var f in t.GetFields(flags))
-                sb.AppendLine("  FIELD " + f.Name + " : " + TypeName(f.FieldType));
-
-            foreach (var c in t.GetConstructors(flags))
-                sb.AppendLine("  CTOR " + c);
-
-            foreach (var m in t.GetMethods(flags))
-                sb.AppendLine("  METHOD " + FormatMethod(m));
-
-            sb.AppendLine();
-        }
-
-        private static void DumpFilteredMethods(StringBuilder sb, Type t)
-        {
-            sb.AppendLine("FILTERED " + t.FullName);
-            var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly;
-            foreach (var m in t.GetMethods(flags))
+            var showPerson = FindSelectedShowPerson(_sb);
+            if (showPerson == null)
             {
-                string n = m.Name ?? "";
-                if (n.IndexOf("Open", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    n.IndexOf("Data", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    n.IndexOf("Target", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    n.IndexOf("Node", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    n.IndexOf("Set", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    n.IndexOf("Get", StringComparison.OrdinalIgnoreCase) >= 0)
+                _sb.AppendLine("RESULT: selected ShowPerson NOT FOUND");
+                SaveAndReset();
+                return;
+            }
+
+            try
+            {
+                BindingPath path;
+                ActionGroupings groupings;
+                bool multiple;
+                var objects = PluginContextMenuContributor.GetContextMenuObjects(showPerson, out path, out groupings, out multiple);
+                _sb.AppendLine("GetContextMenuObjects count=" + (objects == null ? -1 : objects.Count) + " multiple=" + multiple);
+                if (objects == null || objects.Count == 0)
                 {
-                    sb.AppendLine("  " + FormatMethod(m));
+                    _sb.AppendLine("RESULT: no context objects");
+                    SaveAndReset();
+                    return;
+                }
+
+                _source = null;
+                for (int i = 0; i < objects.Count; i++)
+                {
+                    var tv = objects[i];
+                    string type = SafeType(tv);
+                    _sb.AppendLine("OBJ[" + i + "] type=" + type + " text='" + SafeText(tv) + "'");
+                    if (_source == null && type == "FM.UI.PersonReference") _source = tv;
+                }
+                if (_source == null)
+                {
+                    _sb.AppendLine("RESULT: no PersonReference source");
+                    SaveAndReset();
+                    return;
+                }
+
+                var raw = _source.Get();
+                var pr = new PersonReference(raw.Pointer);
+                _sb.AppendLine("REAL PERSON Data1=" + pr.Data1 + " m_index=" + pr.m_index + " combined=" + pr.CombinedIndexAndType + " type=" + pr.Type);
+            }
+            catch (Exception ex)
+            {
+                _sb.AppendLine("context/source FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                SaveAndReset();
+                return;
+            }
+
+            _bindings = EmbeddedDataHandler.s_bindingSubsystem;
+            if (_bindings == null)
+            {
+                _sb.AppendLine("RESULT: BindingSubsystem NOT FOUND");
+                SaveAndReset();
+                return;
+            }
+
+            try
+            {
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_openrequest_name");
+                _sb.AppendLine("NODE key=" + _key.m_key + " valid=" + _key.IsValid() + " exists=" + _bindings.Exists(ref _key));
+
+                if (_bindings.m_nodes == null || !_bindings.m_nodes.ContainsKey(_key.m_key))
+                {
+                    _sb.AppendLine("RESULT: created key not present in m_nodes");
+                    SaveAndReset();
+                    return;
+                }
+
+                _node = _bindings.m_nodes[_key.m_key];
+                if (_node == null)
+                {
+                    _sb.AppendLine("RESULT: m_nodes entry is null");
+                    SaveAndReset();
+                    return;
+                }
+
+                _sb.AppendLine("NODE before: name='" + (_node.m_name ?? "") + "' dataKeyRaw=" + _node.m_dataKey.m_key + " dataKeyValid=" + _node.m_dataKey.IsValid() + " propID=" + SafePropertyId(_node.m_propID));
+
+                // The target node must identify which property this data slot represents.
+                _node.m_propID = new PropertyID(NameProperty);
+
+                // Allocate a real Bindings.Data entry, then attach it to this node.
+                _data = _bindings.GetNewData();
+                if (_data == null)
+                {
+                    _sb.AppendLine("RESULT: GetNewData returned null");
+                    SaveAndReset();
+                    return;
+                }
+
+                _sb.AppendLine("DATA allocated: keyRaw=" + _data.key.m_key + " keyValid=" + _data.key.IsValid() + " isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel);
+                _bindings.SetTargetData(_data, _node);
+
+                var dataKey = _node.m_dataKey;
+                _sb.AppendLine("NODE after SetTargetData: dataKeyRaw=" + dataKey.m_key + " dataKeyValid=" + dataKey.IsValid() + " propID=" + SafePropertyId(_node.m_propID));
+                _sb.AppendLine("DATA after target: keyRaw=" + _data.key.m_key + " isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " opener=" + _data.opener.m_key);
+
+                var request = new Bindings.OpenRequest(_source, dataKey);
+                _sb.AppendLine("pendingOpen before=" + SafePendingCount(_bindings));
+                bool opened = _bindings.TryOpenChannel(ref request);
+                _sb.AppendLine("TryOpenChannel returned=" + opened);
+                _sb.AppendLine("pendingOpen immediatelyAfter=" + SafePendingCount(_bindings));
+                _sb.AppendLine("DATA immediatelyAfter: isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handler=" + SafeHandlerType(_data));
+
+                // Let the normal BindingSubsystem update/backend callback path do its work.
+                _waiting = true;
+                _checkAt = Time.unscaledTime + WaitSeconds;
+            }
+            catch (Exception ex)
+            {
+                _sb.AppendLine("PLUMBING FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                _sb.AppendLine(ex.ToString());
+                SaveAndReset();
+            }
+        }
+
+        private void FinishProbe()
+        {
+            _waiting = false;
+            _sb.AppendLine();
+            _sb.AppendLine("=== AFTER " + WaitSeconds + "s ===");
+
+            try
+            {
+                _sb.AppendLine("pendingOpen=" + SafePendingCount(_bindings));
+                if (_data != null)
+                {
+                    _sb.AppendLine("DATA: keyRaw=" + _data.key.m_key + " isSet=" + _data.IsSet + " hasOpenChannel=" + _data.HasOpenChannel + " handler=" + SafeHandlerType(_data) + " opener=" + _data.opener.m_key);
+                    var dv = _data.Value;
+                    _sb.AppendLine("DATA VALUE=" + (dv == null ? "<null>" : (SafeType(dv) + " '" + SafeText(dv) + "'")));
+                }
+
+                if (_node != null)
+                {
+                    var nk = _node.m_dataKey;
+                    _sb.AppendLine("NODE: dataKeyRaw=" + nk.m_key + " dataKeyValid=" + nk.IsValid() + " propID=" + SafePropertyId(_node.m_propID));
+                    var nv = _node.Value;
+                    _sb.AppendLine("NODE VALUE=" + (nv == null ? "<null>" : (SafeType(nv) + " '" + SafeText(nv) + "'")));
+                }
+
+                bool exists = _bindings != null && _bindings.Exists(ref _key);
+                bool set = _bindings != null && _bindings.IsDataSet(_key);
+                _sb.AppendLine("GLOBAL exists=" + exists + " isDataSet=" + set);
+                if (exists && set)
+                {
+                    var value = _bindings.Get(ref _key);
+                    _sb.AppendLine("GLOBAL VALUE=" + (value == null ? "<null>" : (SafeType(value) + " '" + SafeText(value) + "'")));
                 }
             }
-            sb.AppendLine();
-        }
-
-        private static string FormatMethod(MethodInfo m)
-        {
-            var s = new StringBuilder();
-            s.Append(m.IsPublic ? "public " : (m.IsPrivate ? "private " : (m.IsFamily ? "protected " : "internal ")));
-            if (m.IsStatic) s.Append("static ");
-            s.Append(TypeName(m.ReturnType)).Append(" ").Append(m.Name).Append("(");
-            var ps = m.GetParameters();
-            for (int i = 0; i < ps.Length; i++)
+            catch (Exception ex)
             {
-                if (i > 0) s.Append(", ");
-                if (ps[i].IsOut) s.Append("out ");
-                else if (ps[i].ParameterType.IsByRef) s.Append("ref ");
-                var pt = ps[i].ParameterType.IsByRef ? ps[i].ParameterType.GetElementType() : ps[i].ParameterType;
-                s.Append(TypeName(pt)).Append(" ").Append(ps[i].Name);
+                _sb.AppendLine("READBACK FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                _sb.AppendLine(ex.ToString());
             }
-            s.Append(")");
-            return s.ToString();
+
+            SaveAndReset();
         }
 
-        private static string TypeName(Type t)
+        private static int SafePendingCount(BindingSubsystem b)
         {
-            if (t == null) return "<null>";
-            if (t.IsGenericType)
+            try { return b == null || b.m_pendingOpen == null ? -1 : b.m_pendingOpen.Count; }
+            catch { return -2; }
+        }
+
+        private static string SafeHandlerType(Bindings.Data data)
+        {
+            try
             {
-                var def = t.GetGenericTypeDefinition();
-                var name = def.FullName;
-                int tick = name == null ? -1 : name.IndexOf('`');
-                if (tick >= 0) name = name.Substring(0, tick);
-                var args = t.GetGenericArguments();
-                var sb = new StringBuilder(name ?? def.Name);
-                sb.Append("<");
-                for (int i = 0; i < args.Length; i++)
+                if (data == null || data.handler == null) return "<null>";
+                var t = data.handler.GetIl2CppType();
+                return t == null ? "<unknown>" : t.FullName;
+            }
+            catch { return "<failed>"; }
+        }
+
+        private static string SafePropertyId(PropertyID id)
+        {
+            try { return id.m_id.ToString(); }
+            catch
+            {
+                try { return id.ToString(); }
+                catch { return "<failed>"; }
+            }
+        }
+
+        private static VisualElement FindSelectedShowPerson(StringBuilder sb)
+        {
+            try
+            {
+                var docs = Resources.FindObjectsOfTypeAll<UIDocument>();
+                sb.AppendLine("UIDocument count=" + (docs == null ? 0 : docs.Length));
+                if (docs == null) return null;
+                for (int i = 0; i < docs.Length; i++)
                 {
-                    if (i > 0) sb.Append(",");
-                    sb.Append(TypeName(args[i]));
+                    var doc = docs[i];
+                    if (doc == null) continue;
+                    VisualElement root = null;
+                    try { root = doc.rootVisualElement; } catch { }
+                    var found = FindSelectedRecursive(root);
+                    if (found != null)
+                    {
+                        sb.AppendLine("selected element found in UIDocument[" + i + "]");
+                        return found;
+                    }
                 }
-                sb.Append(">");
-                return sb.ToString();
             }
-            return t.FullName ?? t.Name;
+            catch (Exception ex) { sb.AppendLine("FindSelected FAIL: " + ex.GetType().Name + " - " + ex.Message); }
+            return null;
+        }
+
+        private static VisualElement FindSelectedRecursive(VisualElement ve)
+        {
+            if (ve == null) return null;
+            try
+            {
+                if (ve.ClassListContains("virtualised-list__item--selected"))
+                {
+                    var show = FindNamedRecursive(ve, "ShowPerson");
+                    if (show != null) return show;
+                }
+            }
+            catch { }
+            int count = 0;
+            try { count = ve.childCount; } catch { }
+            for (int i = 0; i < count; i++)
+            {
+                VisualElement child = null;
+                try { child = ve[i]; } catch { }
+                var found = FindSelectedRecursive(child);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        private static VisualElement FindNamedRecursive(VisualElement ve, string name)
+        {
+            if (ve == null) return null;
+            try { if (ve.name == name) return ve; } catch { }
+            int count = 0;
+            try { count = ve.childCount; } catch { }
+            for (int i = 0; i < count; i++)
+            {
+                VisualElement child = null;
+                try { child = ve[i]; } catch { }
+                var found = FindNamedRecursive(child, name);
+                if (found != null) return found;
+            }
+            return null;
+        }
+
+        private static unsafe Bindings.Key CreateTemporaryNode(BindingSubsystem bindings, string name)
+        {
+            fixed (char* p = name)
+            {
+                var span = new Il2CppSystem.ReadOnlySpan<char>((void*)p, name.Length);
+                return bindings.Create(ref span, Bindings.NodeFlags.Temporary);
+            }
+        }
+
+        private void SaveAndReset()
+        {
+            _waiting = false;
+            if (_sb != null) Save(_sb);
+            _data = null;
+            _node = null;
+            _source = null;
+            _bindings = null;
+            _sb = null;
+        }
+
+        private static string SafeType(TypedValue tv)
+        {
+            try { return tv == null || tv.DataType == null ? "<null>" : tv.DataType.FullName; }
+            catch { return "<failed>"; }
+        }
+
+        private static string SafeText(TypedValue tv)
+        {
+            try { return tv == null ? "<null>" : (tv.AsString() ?? ""); }
+            catch (Exception ex) { return "<" + ex.GetType().Name + ">"; }
         }
 
         private static void Save(StringBuilder sb)
@@ -166,14 +364,11 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "bindingplumbing_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "openrequest_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
-            catch (Exception ex)
-            {
-                Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex);
-            }
+            catch (Exception ex) { Plugin.Log.LogError("[FM26FullProbe] Save failed: " + ex); }
         }
     }
 }
