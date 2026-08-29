@@ -14,7 +14,7 @@ using SI.Bindable.Reference.Core;
 
 namespace FM26FullPlayerProbe
 {
-    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.30.1")]
+    [BepInPlugin("com.schumy12.fm26.fullplayerprobe", "FM26 Full Player Probe", "0.31.0")]
     public sealed class Plugin : BasePlugin
     {
         internal static new BepInEx.Logging.ManualLogSource Log;
@@ -23,7 +23,7 @@ namespace FM26FullPlayerProbe
         public override void Load()
         {
             Log = base.Log;
-            Log.LogInfo("[FM26FullProbe] Loaded v0.30.1 SELECTED UI CONTEXT REFERENCE - select one player in Recruitment > Players in Range and press F8.");
+            Log.LogInfo("[FM26FullProbe] Loaded v0.31 REAL SELECTED PLAYER MULTI-PROPERTY - select one player and press F8.");
             _behaviour = AddComponent<ProbeBehaviour>();
         }
 
@@ -36,17 +36,40 @@ namespace FM26FullPlayerProbe
 
     public sealed class ProbeBehaviour : MonoBehaviour
     {
-        private const uint UniqueIdProperty = 1970170212u;
-        private const float WaitSeconds = 1.5f;
+        private const float WaitPerProperty = 1.0f;
+
+        private struct PropertySpec
+        {
+            public string Name;
+            public uint Id;
+            public PropertySpec(string name, uint id) { Name = name; Id = id; }
+        }
+
+        private static readonly PropertySpec[] Properties = new PropertySpec[]
+        {
+            new PropertySpec("UniqueId", 1970170212u),
+            new PropertySpec("Name", 1851878757u),
+            new PropertySpec("Surname", 843789105u),
+            new PropertySpec("Age", 825565216u),
+            new PropertySpec("IsPlayer", 862938733u),
+            new PropertySpec("Club", 825630752u),
+            new PropertySpec("Team", 1415930221u),
+            new PropertySpec("Reputation", 1848658298u),
+            new PropertySpec("PlayerCurrentAbility", 1346584898u),
+            new PropertySpec("PlayerPotentialAbility", 1347436866u),
+            new PropertySpec("AttributeAcceleration", 892805152u),
+            new PropertySpec("Personality", 1349742196u)
+        };
 
         private BindingSubsystem _bindings;
         private InteropDataHandler _handler;
         private Bindings.Key _key;
         private TypedValue _source;
         private StringBuilder _sb;
-        private bool _waiting;
-        private float _checkAt;
+        private bool _running;
         private bool _channelOpen;
+        private int _propertyIndex;
+        private float _checkAt;
 
         public ProbeBehaviour(IntPtr ptr) : base(ptr) { }
 
@@ -54,26 +77,27 @@ namespace FM26FullPlayerProbe
         {
             try
             {
-                if (!_waiting && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
+                if (!_running && Keyboard.current != null && Keyboard.current.f8Key.wasPressedThisFrame)
                     StartProbe();
 
-                if (_waiting && Time.unscaledTime >= _checkAt)
-                    FinishBackendCheck();
+                if (_running && Time.unscaledTime >= _checkAt)
+                    CheckCurrentProperty();
             }
             catch (Exception ex)
             {
                 Plugin.Log.LogError("[FM26FullProbe] Update error: " + ex);
                 try { _sb?.AppendLine("UPDATE/FATAL: " + ex); } catch { }
-                SaveAndReset();
+                Finish("fatal update error");
             }
         }
 
         private void StartProbe()
         {
             _sb = new StringBuilder();
-            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.30.1 SELECTED UI CONTEXT REFERENCE ===");
-            _sb.AppendLine("0.29 proved synthetic PersonReference indices 0..31 open native channels but resolve no data.");
-            _sb.AppendLine("This probe retrieves context-menu TypedValue objects from the actually selected ShowPerson element, then asks the live InteropDataHandler for UniqueId using that exact object.");
+            _sb.AppendLine("=== FM26 FULL PLAYER PROBE 0.31 REAL SELECTED PLAYER MULTI-PROPERTY ===");
+            _sb.AppendLine("0.30.1 successfully recovered the real selected FM.UI.PersonReference, but UniqueId alone produced no backend value.");
+            _sb.AppendLine("This probe keeps that exact live PersonReference and asks several accepted properties sequentially.");
+            _sb.AppendLine("It also logs the real PersonReference identity and InteropDataHandler.CanHandle result for every property.");
             _sb.AppendLine("No Harmony. No reflection getter invocation. No Bindings.Remove.");
             _sb.AppendLine();
 
@@ -81,7 +105,7 @@ namespace FM26FullPlayerProbe
             if (showPerson == null)
             {
                 _sb.AppendLine("RESULT: selected ShowPerson element NOT FOUND");
-                SaveAndReset();
+                Finish("no selected ShowPerson");
                 return;
             }
 
@@ -99,14 +123,14 @@ namespace FM26FullPlayerProbe
             catch (Exception ex)
             {
                 _sb.AppendLine("GetContextMenuObjects FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                SaveAndReset();
+                Finish("context lookup failed");
                 return;
             }
 
             if (objects == null || objects.Count == 0)
             {
                 _sb.AppendLine("RESULT: no context objects returned");
-                SaveAndReset();
+                Finish("no context objects");
                 return;
             }
 
@@ -121,21 +145,34 @@ namespace FM26FullPlayerProbe
                 }
 
                 string type = SafeType(tv);
-                string text = SafeText(tv);
-                _sb.AppendLine("OBJ[" + i + "] type=" + type + " text='" + text + "'");
+                _sb.AppendLine("OBJ[" + i + "] type=" + type + " text='" + SafeText(tv) + "'");
 
                 try
                 {
                     var raw = tv.Get();
                     if (raw != null)
+                    {
                         _sb.AppendLine("  raw ptr=0x" + raw.Pointer.ToString("X") + " il2cppType=" + (raw.GetIl2CppType() == null ? "<null>" : raw.GetIl2CppType().FullName));
+                        if (type == "FM.UI.PersonReference")
+                        {
+                            try
+                            {
+                                var pr = new PersonReference(raw.Pointer);
+                                _sb.AppendLine("  REAL PERSON Data1=" + pr.Data1 + " m_index=" + pr.m_index + " combined=" + pr.CombinedIndexAndType + " type=" + pr.Type);
+                            }
+                            catch (Exception ex)
+                            {
+                                _sb.AppendLine("  REAL PERSON identity read failed: " + ex.GetType().Name + " - " + ex.Message);
+                            }
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
                     _sb.AppendLine("  raw Get failed: " + ex.GetType().Name + " - " + ex.Message);
                 }
 
-                if (_source == null && IsLikelyPlayerReference(type))
+                if (_source == null && type == "FM.UI.PersonReference")
                 {
                     _source = tv;
                     _sb.AppendLine("  SELECTED AS BACKEND SOURCE");
@@ -144,8 +181,8 @@ namespace FM26FullPlayerProbe
 
             if (_source == null)
             {
-                _sb.AppendLine("RESULT: context objects exist, but no Person/Player reference TypedValue found");
-                SaveAndReset();
+                _sb.AppendLine("RESULT: no real PersonReference TypedValue found");
+                Finish("no PersonReference");
                 return;
             }
 
@@ -153,7 +190,7 @@ namespace FM26FullPlayerProbe
             if (_bindings == null)
             {
                 _sb.AppendLine("RESULT: BindingSubsystem NOT FOUND");
-                SaveAndReset();
+                Finish("no BindingSubsystem");
                 return;
             }
 
@@ -161,16 +198,58 @@ namespace FM26FullPlayerProbe
             if (_handler == null)
             {
                 _sb.AppendLine("RESULT: live InteropDataHandler NOT FOUND");
-                SaveAndReset();
+                Finish("no InteropDataHandler");
                 return;
             }
 
             try
             {
-                _key = CreateTemporaryNode(_bindings, "__fm26probe_selected_context");
+                _key = CreateTemporaryNode(_bindings, "__fm26probe_real_player_props");
                 _sb.AppendLine("NODE key=" + SafeKey(_key) + " raw=" + _key.m_key + " valid=" + SafeValid(_key) + " exists=" + SafeExists(_bindings, ref _key));
+            }
+            catch (Exception ex)
+            {
+                _sb.AppendLine("NODE CREATE FAIL: " + ex.GetType().Name + " - " + ex.Message);
+                Finish("node create failed");
+                return;
+            }
 
-                var property = new Bindings.Property("UniqueId", new PropertyID(UniqueIdProperty));
+            _propertyIndex = 0;
+            _running = true;
+            _channelOpen = false;
+            OpenCurrentProperty();
+        }
+
+        private void OpenCurrentProperty()
+        {
+            if (!_running) return;
+            if (_propertyIndex >= Properties.Length)
+            {
+                Finish("all properties completed without data");
+                return;
+            }
+
+            var spec = Properties[_propertyIndex];
+            var property = new Bindings.Property(spec.Name, new PropertyID(spec.Id));
+
+            bool accepted = false;
+            try { accepted = PersonReference.AcceptsPropertyInternal(spec.Id); }
+            catch (Exception ex) { _sb.AppendLine("ACCEPTS FAIL " + spec.Name + ": " + ex.GetType().Name + " - " + ex.Message); }
+
+            string canHandleText = "<not tested>";
+            try
+            {
+                var contexts = new Il2CppSystem.Collections.Generic.List<string>();
+                bool canHandle = _handler.CanHandle(_source, property, contexts);
+                canHandleText = canHandle.ToString();
+            }
+            catch (Exception ex)
+            {
+                canHandleText = "<" + ex.GetType().Name + ": " + ex.Message + ">";
+            }
+
+            try
+            {
                 _handler.OpenChannel(_source, property, _key);
                 _channelOpen = true;
 
@@ -182,50 +261,82 @@ namespace FM26FullPlayerProbe
                 }
                 catch { }
 
-                _sb.AppendLine("OPEN selected source type=" + SafeType(_source) + " channel='" + channelName + "'");
-                _sb.AppendLine("Waiting " + WaitSeconds + "s for native callback...");
-                _waiting = true;
-                _checkAt = Time.unscaledTime + WaitSeconds;
+                _sb.AppendLine("OPEN prop[" + _propertyIndex + "] " + spec.Name + " id=" + spec.Id + " schemaAccepts=" + accepted + " canHandle=" + canHandleText + " channel='" + channelName + "'");
+                _checkAt = Time.unscaledTime + WaitPerProperty;
             }
             catch (Exception ex)
             {
-                _sb.AppendLine("BACKEND OPEN FAIL: " + ex.GetType().Name + " - " + ex.Message);
-                SaveAndReset();
+                _sb.AppendLine("OPEN FAIL prop[" + _propertyIndex + "] " + spec.Name + " " + ex.GetType().Name + " - " + ex.Message);
+                CloseChannel();
+                _propertyIndex++;
+                OpenCurrentProperty();
             }
         }
 
-        private void FinishBackendCheck()
+        private void CheckCurrentProperty()
         {
-            _waiting = false;
-            _sb.AppendLine();
-            _sb.AppendLine("=== BACKEND RESULT ===");
+            if (!_running) return;
+            var spec = Properties[_propertyIndex];
 
-            try
+            bool exists = false;
+            bool isSet = false;
+            try { exists = _bindings != null && _bindings.Exists(ref _key); }
+            catch (Exception ex) { _sb.AppendLine("EXISTS FAIL " + spec.Name + ": " + ex.GetType().Name + " - " + ex.Message); }
+            try { isSet = _bindings != null && _bindings.IsDataSet(_key); }
+            catch (Exception ex) { _sb.AppendLine("ISDATASET FAIL " + spec.Name + ": " + ex.GetType().Name + " - " + ex.Message); }
+
+            if (exists && isSet)
             {
-                bool exists = _bindings != null && _bindings.Exists(ref _key);
-                bool isSet = _bindings != null && _bindings.IsDataSet(_key);
-                _sb.AppendLine("exists=" + exists + " isDataSet=" + isSet);
-
-                if (exists && isSet)
+                try
                 {
                     var tv = _bindings.Get(ref _key);
                     if (tv == null)
-                        _sb.AppendLine("VALUE <null>");
+                        _sb.AppendLine("VALUE " + spec.Name + " <null>");
                     else
-                        _sb.AppendLine("VALUE type=" + SafeType(tv) + " text='" + SafeText(tv) + "'");
+                        _sb.AppendLine("VALUE " + spec.Name + " type=" + SafeType(tv) + " text='" + SafeText(tv) + "'");
                 }
-                else
+                catch (Exception ex)
                 {
-                    _sb.AppendLine("VALUE not produced");
+                    _sb.AppendLine("VALUE READ FAIL " + spec.Name + ": " + ex.GetType().Name + " - " + ex.Message);
                 }
-            }
-            catch (Exception ex)
-            {
-                _sb.AppendLine("BACKEND READ FAIL: " + ex.GetType().Name + " - " + ex.Message);
+
+                Finish("backend produced data for " + spec.Name);
+                return;
             }
 
+            _sb.AppendLine("CHECK " + spec.Name + " exists=" + exists + " isDataSet=" + isSet);
             CloseChannel();
-            SaveAndReset();
+            _propertyIndex++;
+            OpenCurrentProperty();
+        }
+
+        private void CloseChannel()
+        {
+            if (!_channelOpen || _handler == null) return;
+            try { _handler.CloseChannel(_key); }
+            catch (Exception ex) { try { _sb?.AppendLine("CLOSE FAIL propIndex=" + _propertyIndex + " " + ex.GetType().Name + " - " + ex.Message); } catch { } }
+            _channelOpen = false;
+        }
+
+        private void Finish(string reason)
+        {
+            CloseChannel();
+            _running = false;
+            if (_sb == null) return;
+
+            _sb.AppendLine();
+            _sb.AppendLine("=== RESULT ===");
+            _sb.AppendLine("reason=" + reason);
+            _sb.AppendLine("lastPropertyIndex=" + _propertyIndex);
+            try { _sb.AppendLine("node exists=" + (_bindings != null && _bindings.Exists(ref _key))); } catch { }
+            try { _sb.AppendLine("handler channels after close=" + (_handler == null || _handler.m_channels == null ? -1 : _handler.m_channels.Count)); } catch { }
+            _sb.AppendLine("NOTE: temporary node intentionally not removed because Bindings.Remove was unsafe in v0.28.1.");
+
+            Save(_sb);
+            _source = null;
+            _handler = null;
+            _bindings = null;
+            _sb = null;
         }
 
         private static VisualElement FindSelectedShowPerson(StringBuilder sb)
@@ -300,13 +411,6 @@ namespace FM26FullPlayerProbe
             return null;
         }
 
-        private static bool IsLikelyPlayerReference(string type)
-        {
-            if (string.IsNullOrEmpty(type)) return false;
-            if (!type.Contains("Reference")) return false;
-            return type.Contains("Person") || type.Contains("Player");
-        }
-
         private static unsafe Bindings.Key CreateTemporaryNode(BindingSubsystem bindings, string name)
         {
             fixed (char* p = name)
@@ -366,25 +470,6 @@ namespace FM26FullPlayerProbe
             return null;
         }
 
-        private void CloseChannel()
-        {
-            if (!_channelOpen || _handler == null) return;
-            try { _handler.CloseChannel(_key); }
-            catch (Exception ex) { try { _sb?.AppendLine("CLOSE FAIL: " + ex.GetType().Name + " - " + ex.Message); } catch { } }
-            _channelOpen = false;
-        }
-
-        private void SaveAndReset()
-        {
-            CloseChannel();
-            _waiting = false;
-            if (_sb != null) Save(_sb);
-            _source = null;
-            _handler = null;
-            _bindings = null;
-            _sb = null;
-        }
-
         private static bool SafeValid(Bindings.Key key)
         {
             try { return key.IsValid(); } catch { return false; }
@@ -431,7 +516,7 @@ namespace FM26FullPlayerProbe
             {
                 string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Sports Interactive", "Football Manager 26", "FM26FullPlayerProbe");
                 Directory.CreateDirectory(dir);
-                string file = Path.Combine(dir, "selectedcontext_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
+                string file = Path.Combine(dir, "realplayerprops_" + System.DateTime.Now.ToString("yyyyMMdd_HHmmss_fff") + ".txt");
                 File.WriteAllText(file, sb.ToString(), Encoding.UTF8);
                 Plugin.Log.LogInfo("[FM26FullProbe] Saved: " + file);
             }
